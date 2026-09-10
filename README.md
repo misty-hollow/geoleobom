@@ -57,7 +57,80 @@ STATUS.md      현재 상태와 다음 작업
 
 **미확인.** v2.1 5절과 개발 운영 가이드 7절이 절차의 기준이다. 실제로 실행해 확인한 뒤 여기에 적는다.
 
-## 이전 버전 복구
+## Git 저장·복구 (2026-09-10 실제 실행해 확인)
+
+아래 순서를 실제로 한 번 수행해 동작을 확인했다. 연습 대상은 `README.md` 한 줄이었다.
+
+1. **작업 브랜치 생성·전환** — `main`이 `origin/main`과 같고 변경이 없는 상태에서 시작한다.
+
+   ```
+   git switch --create chore/git-recovery-practice
+   ```
+
+2. **변경 확인** — 무엇이 어떻게 바뀌었는지 커밋 전에 본다.
+
+   ```
+   git diff -- README.md
+   git status --short
+   ```
+
+3. **특정 파일만 stage** — 커밋에 넣을 파일을 이름으로 지정한다.
+
+   ```
+   git add README.md
+   git status --short
+   ```
+
+4. **커밋**
+
+   ```
+   git commit -m "chore: practice git recovery workflow"
+   git log --oneline -2
+   ```
+
+5. **원격 브랜치 생성과 업로드** — 처음 올리는 브랜치는 `-u`로 연결까지 함께 한다.
+
+   ```
+   git push -u origin chore/git-recovery-practice
+   ```
+
+6. **되돌리기** — 이미 커밋하고 올린 변경은 `revert`로 되돌린다. 새 커밋이 하나 더 생기고 기존 이력은 남는다.
+
+   ```
+   git revert --no-edit 26e597c
+   ```
+
+7. **되돌린 결과 업로드**
+
+   ```
+   git push
+   ```
+
+**복구가 제대로 됐는지 확인하는 방법**
+
+```
+git diff <되돌리기 전 기준 커밋>..HEAD -- README.md
+git status
+```
+
+첫 명령의 출력이 비어 있으면 파일 내용이 기준 시점과 같다. `git status`가 `working tree clean`이면 남은 변경이 없다.
+
+**`main`이 손상되지 않았는지 확인하는 방법**
+
+```
+git rev-parse main
+git rev-parse origin/main
+git branch -vv
+git ls-remote --heads origin
+```
+
+앞의 두 값이 서로 같고 작업 시작 전 기준 커밋과 같으면 `main`은 그대로다. `git ls-remote`는 GitHub 서버의 실제 상태를 직접 읽으므로 원격까지 확인할 수 있다.
+
+확인된 사실: 위 연습은 작업 브랜치 안에서만 일어났고 `main`과 `origin/main`은 기준 커밋에서 움직이지 않았다.
+
+`reset --hard`, `rebase`, 강제 push는 사용하지 않았고 확인하지도 않았다.
+
+## 데이터 배포본 복구
 
 **미확인.** v2.1 5절의 데이터 교체·롤백 절차와 개발 운영 가이드 7절이 기준이다. Week 8에 복구 실습을 수행한다.
 
