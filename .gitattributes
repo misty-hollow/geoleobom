@@ -1,0 +1,67 @@
+# 줄바꿈 규칙
+#
+# Windows에서 만든 파일이 Linux 서버(Ubuntu VPS)에서 깨지지 않게 한다.
+# 이 파일의 규칙은 각자 PC의 Git 전역 설정(core.autocrlf)보다 우선하므로,
+# 팀원 PC 설정이 달라도 저장소에는 같은 형태로 저장된다.
+
+# 기본: 텍스트로 판단되는 파일은 저장소에 LF로 저장한다.
+* text=auto eol=lf
+
+# --- Linux에서 실행되는 파일: 반드시 LF ---
+*.sh            text eol=lf
+*.bash          text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.dockerfile    text eol=lf
+Caddyfile       text eol=lf
+Caddyfile.*     text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.env.example    text eol=lf
+*.env.example   text eol=lf
+
+# --- 소스·설정·문서: LF ---
+*.py            text eol=lf
+*.ts            text eol=lf
+*.tsx           text eol=lf
+*.js            text eol=lf
+*.jsx           text eol=lf
+*.json          text eol=lf
+*.css           text eol=lf
+*.html          text eol=lf
+*.md            text eol=lf
+*.txt           text eol=lf
+*.csv           text eol=lf
+*.toml          text eol=lf
+*.cfg           text eol=lf
+*.ini           text eol=lf
+*.sql           text eol=lf
+*.lua           text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# --- Windows 전용 실행 파일만 CRLF ---
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# --- 바이너리: Git이 줄바꿈을 건드리지 않게 한다 ---
+*.gpkg          binary
+*.osrm          binary
+*.osrm.*        binary
+*.pbf           binary
+*.osm.pbf       binary
+*.tif           binary
+*.tiff          binary
+*.zip           binary
+*.gz            binary
+*.7z            binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.webp          binary
+*.ico           binary
+*.pdf           binary
+*.woff          binary
+*.woff2         binary
+*.mp4           binary

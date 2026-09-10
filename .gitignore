@@ -1,0 +1,71 @@
+# 비밀값 — 절대 커밋하지 않는다
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+secrets/
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# 대용량 데이터 — 확장자로 막는다.
+# 생성 방법·작은 검사 데이터·버전 기록은 저장소에 둔다 (운영 가이드 11절).
+# 특정 작은 파일을 넣어야 하면 아래에 예외 한 줄을 추가한다.
+*.gpkg
+*.gpkg-journal
+*.gpkg-wal
+*.gpkg-shm
+*.osrm
+*.osrm.*
+*.pbf
+*.osm
+*.osm.bz2
+*.tif
+*.tiff
+*.sqlite
+*.sqlite3
+*.db
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+build/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# 도구·개인 설정
+.claude/settings.local.json
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 로그·임시
+*.log
+tmp/
+temp/
