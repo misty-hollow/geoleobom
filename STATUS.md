@@ -1,33 +1,33 @@
 # 현재 상태 (STATUS.md)
 
-갱신: 2026-09-10 (Week 1)
+갱신: 2026-09-11 (Week 1)
 
 ## 지금 동작하는 것
 
+- **공개 주소 `https://geoleobom.kr`에서 걸어봄 빈 페이지가 열린다.** `http://`로 접속하면 308로 `https://`에 전환된다.
+- 운영 서버에서 Caddy 컨테이너가 Docker Compose로 기동 중이다. 재기동해도 같은 결과가 나오는 것을 확인했다.
 - 저장소 최소 운영 뼈대 파일 7종: `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `STATUS.md`, `.gitattributes`, `.gitignore`.
-- 기준 문서: `docs/걸어봄_확정설계_v2.2.md`(단일 기준, 작성 완료·commit 전), `docs/걸어봄_확정설계_v2.1.md`(동결 원본·이력), `docs/걸어봄_개발운영가이드_v1.md`.
+- 기준 문서: `docs/걸어봄_확정설계_v2.2.md`(단일 기준), `docs/걸어봄_확정설계_v2.1.md`(동결 원본·이력), `docs/걸어봄_개발운영가이드_v1.md`.
 - Git 저장·복구 절차를 실제로 한 번 수행해 확인했다. 순서는 `README.md`에 있다.
-- 운영 서버(VPS) 1대가 결제·생성되어 active 상태다. 아직 접속·설정 전이다.
 
-제품 코드와 설치한 패키지는 없다. 공개 주소에서 열리는 페이지는 아직 없다.
+제품 기능 코드는 아직 없다. 공개 페이지에 보이는 것은 "걸어봄" 글자 한 줄뿐이다.
 
 ## 현재 작업
 
-**Week 1 HTTPS 빈 페이지 배포.**
-- 배포 파일 3개(`deploy/compose.yaml`, `deploy/Caddyfile`, `deploy/site/index.html`)를 작업 브랜치에 작성했다.
-- 실제 서버가 Los Angeles라 v2.1(서울)과 달라, **v2.2 선개정**을 작성해 서버 사양·해외 리전 검증·비용을 반영했다. v2.1은 동결 원본으로 보존.
-- 위 변경은 모두 commit·push 전이다.
+**Week 1 HTTPS 빈 페이지 배포 — 완료.**
+
+배포 파일 3개(`deploy/compose.yaml`, `deploy/Caddyfile`, `deploy/site/index.html`)를 `main`에 반영하고, 그 내용 그대로 서버에 배포해 공개 도메인에서 동작을 확인했다.
 
 ## 저장소 상태
 
 | 항목 | 상태 |
 |---|---|
-| `main` / `origin/main` | `cf88ca9` — 동일 |
-| 현재 작업 브랜치 | `feat/https-blank-page` (기준 `cf88ca9`, 아직 커밋 없음) |
-| 신규 파일(추적 전) | `deploy/` 3개, `docs/걸어봄_확정설계_v2.2.md` |
-| 수정 파일(commit 전) | `PROJECT.md`(기준 문서 v2.2로), `STATUS.md` |
-| Caddy 이미지 태그 | `caddy:2.11.4-alpine` — Docker Hub 존재 확인, 확정 |
-| Caddyfile 도메인 | `YOUR_DOMAIN.invalid` 자리표시자. 실제 도메인 미확정 |
+| `main` / `origin/main` | `0cb2110` — 동일 |
+| 현재 작업 브랜치 | `feat/https-blank-page` (`624bddc`, 내용은 `main`과 차이 없음) |
+| 배포 파일 3개 | `main`에 반영 완료 |
+| 서버 배포본 | `/opt/geoleobom` — `origin/main`의 3개 파일과 해시 일치 |
+| Caddy 이미지 태그 | `caddy:2.11.4-alpine` — 고정 |
+| Caddyfile 도메인 | `geoleobom.kr` — 확정 |
 
 ## 운영 서버 상태
 
@@ -36,21 +36,36 @@
 | 항목 | 값 |
 |---|---|
 | 서버 | InterServer KVM VPS Slice 2 slices · Los Angeles(lax1) · 4GB · 1 core · Ubuntu 24.04 |
-| 상태 | **결제 및 서버 생성 완료 · active** |
-| SSH 접속 | 미확인 |
-| 초기 설정(사용자·SSH 키·방화벽·스왑) | 미실행 |
-| Docker 설치 | 미실행 |
-| HTTPS 빈 페이지 배포 | 미완료 |
-| 도메인 | 미확보 |
+| 상태 | 결제 및 서버 생성 완료 · active |
+| SSH 접속 | **키 인증 전용 전환 완료** (비밀번호 로그인 차단) |
+| swap | **총 2GB 구성 완료. 재부팅 후 유지 확인** |
+| Docker | **Engine + Compose plugin 설치 완료** |
+| UFW | **active. 22/tcp · 80/tcp · 443/tcp 허용** |
+| 외부 TCP 노출 | **22 / 80 / 443 만 확인됨** (Docker가 추가로 연 응용 포트 없음) |
+| 도메인 | **`geoleobom.kr` 구매 완료. apex A 레코드가 이 VPS IPv4를 가리킴** |
+| TLS 인증서 | **공인 인증서 발급 완료. 체인 신뢰 확인** (Let's Encrypt, 만료 2026-12-10) |
+| HTTPS 빈 페이지 배포 | **완료 (2026-09-11)** |
 
 ## 막힌 점
 
-없다. 다음 작업에 필요한 값(서버 IP, SSH 접속 정보)은 공급자 콘솔에서 확인한다.
+없다.
 
 ## 다음 작업 하나
 
-**VPS SSH 접속 확인 및 초기 서버 설정 준비.**
+**게이트 1의 남은 항목 중 API 계약·PROJECT.md 고정 상태와 OSRM 고정 이미지 태그 일치 여부를 점검한다.**
 
 ## 게이트 1 상태 (v2.2 10절)
 
-전 항목 미확인. HTTPS 빈 페이지 배포는 진행 중.
+**게이트 1은 아직 전체 완료가 아니다.** 아래에서 완료로 표시한 항목은 실제 확인 증거가 있는 것만이다.
+
+| 항목 | 상태 |
+|---|---|
+| HTTPS 빈 페이지 배포 성공(도메인·Caddy·Compose 실동작) | **완료 (2026-09-11)** |
+| 핵심 개발자 주 20h, B·C 각 8h 시간표 확보 | 미확인 |
+| API 계약(4-4) 규약 고정 및 PROJECT.md 기록 | 미완료 |
+| OSRM 이미지 태그 고정 및 PC·서버 동일 태그 확인 | 미완료 |
+| 카카오 저장·공유 필드·보관 위치·보관기간·재사용 방식 정리 | 미확인 |
+| 카카오 문의 발송 및 적용 조항·공식 답변 기록 | 미확인 |
+| 회신 지연 시 공개 조건 관리 방침 적용 | 미확인 |
+| 지도 SDK·로컬 API 쿼터, 앱 권한, 무료 쿼터 조건 확인 | 미확인 |
+| 위치정보법 확인 채널 질의 발송 | 미확인 |
