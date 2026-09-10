@@ -1,0 +1,25 @@
+# 걸어봄 배포 구성 (Week 1 — HTTPS 빈 페이지)
+# 기준: v2.2 4-1(웹 서버 Caddy, 배포 Docker Compose), 5절(서버 구성)
+#
+# 이번 단계는 caddy 하나만 띄운다.
+# Week 2에 api(FastAPI)와 osrm을 추가할 때, 두 서비스에는
+# v2.2 5절에 따라 ports: 매핑을 만들지 않는다. 외부 공개는 caddy만 담당한다.
+
+services:
+  caddy:
+    # 태그 고정. latest 금지.
+    image: caddy:2.11.4-alpine
+    container_name: geoleobom-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"     # http -> https 전환, 인증서 발급 확인
+      - "443:443"   # https 서비스
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro   # 설정 (읽기 전용)
+      - ./site:/srv/site:ro                   # 정적 파일 (읽기 전용)
+      - caddy_data:/data                      # 인증서 보관 - 반드시 필요
+      - caddy_config:/config                  # Caddy 내부 상태
+
+volumes:
+  caddy_data:
+  caddy_config:
