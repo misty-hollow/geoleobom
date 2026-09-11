@@ -1,0 +1,261 @@
+{
+  "changed": 0,
+  "total": 25,
+  "findings": [
+    {
+      "id": "gongju-knu-gate",
+      "label": "공주대 신관캠퍼스 정문",
+      "nearest": {
+        "convenience": {
+          "in_radius": 70,
+          "capped_best_fid": 245958051296928,
+          "capped_best_seconds": 254.0,
+          "uncapped_best_fid": 245958051296928,
+          "uncapped_best_seconds": 254.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "grocery": {
+          "in_radius": 79,
+          "capped_best_fid": 174313731637873,
+          "capped_best_seconds": 448.3,
+          "uncapped_best_fid": 174313731637873,
+          "uncapped_best_seconds": 448.3,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "pharmacy": {
+          "in_radius": 42,
+          "capped_best_fid": 114843440274544,
+          "capped_best_seconds": 430.2,
+          "uncapped_best_fid": 114843440274544,
+          "uncapped_best_seconds": 430.2,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "medical": {
+          "in_radius": 109,
+          "capped_best_fid": 149729964998750,
+          "capped_best_seconds": 393.8,
+          "uncapped_best_fid": 149729964998750,
+          "uncapped_best_seconds": 393.8,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "park": {
+          "in_radius": 17,
+          "capped_best_fid": 255293460184892,
+          "capped_best_seconds": 617.9,
+          "uncapped_best_fid": 255293460184892,
+          "uncapped_best_seconds": 617.9,
+          "changed": false,
+          "seconds_saved": 0.0
+        }
+      }
+    },
+    {
+      "id": "gongju-sanseong-market",
+      "label": "공주 산성시장",
+      "nearest": {
+        "convenience": {
+          "in_radius": 44,
+          "capped_best_fid": 21491417613133,
+          "capped_best_seconds": 265.2,
+          "uncapped_best_fid": 21491417613133,
+          "uncapped_best_seconds": 265.2,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "grocery": {
+          "in_radius": 54,
+          "capped_best_fid": 180870738486275,
+          "capped_best_seconds": 495.3,
+          "uncapped_best_fid": 180870738486275,
+          "uncapped_best_seconds": 495.3,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "pharmacy": {
+          "in_radius": 29,
+          "capped_best_fid": 31100983404455,
+          "capped_best_seconds": 859.1,
+          "uncapped_best_fid": 31100983404455,
+          "uncapped_best_seconds": 859.1,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "medical": {
+          "in_radius": 71,
+          "capped_best_fid": 92536693556534,
+          "capped_best_seconds": 283.2,
+          "uncapped_best_fid": 92536693556534,
+          "uncapped_best_seconds": 283.2,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "park": {
+          "in_radius": 8,
+          "capped_best_fid": 56477165680643,
+          "capped_best_seconds": 661.8,
+          "uncapped_best_fid": 56477165680643,
+          "uncapped_best_seconds": 661.8,
+          "changed": false,
+          "seconds_saved": 0.0
+        }
+      }
+    },
+    {
+      "id": "sejong-government-complex",
+      "label": "정부세종청사",
+      "nearest": {
+        "convenience": {
+          "in_radius": 108,
+          "capped_best_fid": 204428287163747,
+          "capped_best_seconds": 344.2,
+          "uncapped_best_fid": 204428287163747,
+          "uncapped_best_seconds": 344.2,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "grocery": {
+          "in_radius": 112,
+          "capped_best_fid": 43464095337765,
+          "capped_best_seconds": 338.0,
+          "uncapped_best_fid": 43464095337765,
+          "uncapped_best_seconds": 338.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "pharmacy": {
+          "in_radius": 94,
+          "capped_best_fid": 4462360077127,
+          "capped_best_seconds": 615.6,
+          "uncapped_best_fid": 4462360077127,
+          "uncapped_best_seconds": 615.6,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "medical": {
+          "in_radius": 262,
+          "capped_best_fid": 79920201216444,
+          "capped_best_seconds": 525.9,
+          "uncapped_best_fid": 79920201216444,
+          "uncapped_best_seconds": 525.9,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "park": {
+          "in_radius": 114,
+          "capped_best_fid": 179778634042590,
+          "capped_best_seconds": 141.9,
+          "uncapped_best_fid": 179778634042590,
+          "uncapped_best_seconds": 141.9,
+          "changed": false,
+          "seconds_saved": 0.0
+        }
+      }
+    },
+    {
+      "id": "daejeon-cnu-gate",
+      "label": "충남대 앞 궁동 상권",
+      "nearest": {
+        "convenience": {
+          "in_radius": 273,
+          "capped_best_fid": 225614557532061,
+          "capped_best_seconds": 100.9,
+          "uncapped_best_fid": 225614557532061,
+          "uncapped_best_seconds": 100.9,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "grocery": {
+          "in_radius": 250,
+          "capped_best_fid": 131840328278589,
+          "capped_best_seconds": 38.0,
+          "uncapped_best_fid": 131840328278589,
+          "uncapped_best_seconds": 38.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "pharmacy": {
+          "in_radius": 129,
+          "capped_best_fid": 210621343869999,
+          "capped_best_seconds": 154.0,
+          "uncapped_best_fid": 210621343869999,
+          "uncapped_best_seconds": 154.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "medical": {
+          "in_radius": 451,
+          "capped_best_fid": 1245150079274,
+          "capped_best_seconds": 420.0,
+          "uncapped_best_fid": 1245150079274,
+          "uncapped_best_seconds": 420.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "park": {
+          "in_radius": 85,
+          "capped_best_fid": 17492658175620,
+          "capped_best_seconds": 147.6,
+          "uncapped_best_fid": 17492658175620,
+          "uncapped_best_seconds": 147.6,
+          "changed": false,
+          "seconds_saved": 0.0
+        }
+      }
+    },
+    {
+      "id": "cheongju-cbnu-gate",
+      "label": "충북대 정문",
+      "nearest": {
+        "convenience": {
+          "in_radius": 358,
+          "capped_best_fid": 168014836316851,
+          "capped_best_seconds": 310.8,
+          "uncapped_best_fid": 168014836316851,
+          "uncapped_best_seconds": 310.8,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "grocery": {
+          "in_radius": 344,
+          "capped_best_fid": 137079383660176,
+          "capped_best_seconds": 428.0,
+          "uncapped_best_fid": 137079383660176,
+          "uncapped_best_seconds": 428.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "pharmacy": {
+          "in_radius": 175,
+          "capped_best_fid": 277587491591235,
+          "capped_best_seconds": 529.0,
+          "uncapped_best_fid": 277587491591235,
+          "uncapped_best_seconds": 529.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "medical": {
+          "in_radius": 457,
+          "capped_best_fid": 192034852058985,
+          "capped_best_seconds": 476.8,
+          "uncapped_best_fid": 192034852058985,
+          "uncapped_best_seconds": 476.8,
+          "changed": false,
+          "seconds_saved": 0.0
+        },
+        "park": {
+          "in_radius": 92,
+          "capped_best_fid": 97552822821839,
+          "capped_best_seconds": 660.0,
+          "uncapped_best_fid": 97552822821839,
+          "uncapped_best_seconds": 660.0,
+          "changed": false,
+          "seconds_saved": 0.0
+        }
+      }
+    }
+  ]
+}

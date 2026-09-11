@@ -228,9 +228,9 @@
     }
   },
   "daejeon-cnu-gate": {
-    "label": "충남대 정문",
-    "lon": 127.345,
-    "lat": 36.368,
+    "label": "충남대 앞 궁동 상권",
+    "lon": 127.34802,
+    "lat": 36.36203,
     "summary": {
       "versions": {
         "data_version": "synthetic-cc-01",
@@ -246,60 +246,60 @@
       "nearest": {
         "convenience": {
           "status": "ok",
-          "best_fid": 559,
-          "best_walk_seconds": 948,
+          "best_fid": 557,
+          "best_walk_seconds": 1020,
           "top3_fids": [
-            559,
             557,
-            565
+            564,
+            558
           ]
         },
         "grocery": {
           "status": "ok",
-          "best_fid": 578,
-          "best_walk_seconds": 400,
+          "best_fid": 582,
+          "best_walk_seconds": 643,
           "top3_fids": [
-            578,
             582,
-            590
+            579,
+            578
           ]
         },
         "pharmacy": {
           "status": "ok",
-          "best_fid": 595,
-          "best_walk_seconds": 519,
+          "best_fid": 609,
+          "best_walk_seconds": 612,
           "top3_fids": [
-            595,
             609,
-            594
+            594,
+            600
           ]
         },
         "medical": {
           "status": "ok",
           "best_fid": 631,
-          "best_walk_seconds": 306,
+          "best_walk_seconds": 874,
           "top3_fids": [
             631,
             620,
-            621
+            622
           ]
         },
         "park": {
           "status": "ok",
           "best_fid": 639,
-          "best_walk_seconds": 607,
+          "best_walk_seconds": 449,
           "top3_fids": [
             639,
-            640,
-            643
+            643,
+            640
           ]
         }
       },
       "density": {
         "status": "complete",
-        "count": 10,
-        "candidates_checked": 84,
-        "candidates_total": 84
+        "count": 16,
+        "candidates_checked": 45,
+        "candidates_total": 45
       }
     }
   },

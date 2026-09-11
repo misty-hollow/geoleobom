@@ -1,0 +1,659 @@
+{
+  "detour_max_assumed": 2.0,
+  "cap_risky": [
+    [
+      "공주대 신관캠퍼스 정문",
+      "medical"
+    ],
+    [
+      "공주 산성시장",
+      "pharmacy"
+    ],
+    [
+      "정부세종청사",
+      "medical"
+    ],
+    [
+      "충남대 앞 궁동 상권",
+      "medical"
+    ],
+    [
+      "충북대 정문",
+      "pharmacy"
+    ],
+    [
+      "충북대 정문",
+      "medical"
+    ]
+  ],
+  "candidate_cap": [
+    {
+      "id": "gongju-knu-gate",
+      "label": "공주대 신관캠퍼스 정문",
+      "nearest": {
+        "convenience": {
+          "in_radius": 70,
+          "kept": 20,
+          "dropped": 50,
+          "nearest_kept_m": 229.9,
+          "farthest_kept_m": 621.0,
+          "nearest_dropped_m": 629.5,
+          "cap_cannot_change_best": true
+        },
+        "grocery": {
+          "in_radius": 79,
+          "kept": 20,
+          "dropped": 59,
+          "nearest_kept_m": 106.2,
+          "farthest_kept_m": 629.6,
+          "nearest_dropped_m": 630.9,
+          "cap_cannot_change_best": true
+        },
+        "pharmacy": {
+          "in_radius": 42,
+          "kept": 20,
+          "dropped": 22,
+          "nearest_kept_m": 305.8,
+          "farthest_kept_m": 817.2,
+          "nearest_dropped_m": 1236.4,
+          "cap_cannot_change_best": true
+        },
+        "medical": {
+          "in_radius": 109,
+          "kept": 20,
+          "dropped": 89,
+          "nearest_kept_m": 243.9,
+          "farthest_kept_m": 388.9,
+          "nearest_dropped_m": 434.2,
+          "cap_cannot_change_best": false
+        },
+        "park": {
+          "in_radius": 17,
+          "kept": 17,
+          "dropped": 0,
+          "nearest_kept_m": 461.8,
+          "farthest_kept_m": 2469.6,
+          "nearest_dropped_m": null,
+          "cap_cannot_change_best": true
+        }
+      },
+      "food_cafe_in_1km": 661
+    },
+    {
+      "id": "gongju-sanseong-market",
+      "label": "공주 산성시장",
+      "nearest": {
+        "convenience": {
+          "in_radius": 44,
+          "kept": 20,
+          "dropped": 24,
+          "nearest_kept_m": 149.1,
+          "farthest_kept_m": 1492.9,
+          "nearest_dropped_m": 1524.7,
+          "cap_cannot_change_best": true
+        },
+        "grocery": {
+          "in_radius": 54,
+          "kept": 20,
+          "dropped": 34,
+          "nearest_kept_m": 404.0,
+          "farthest_kept_m": 1286.3,
+          "nearest_dropped_m": 1302.5,
+          "cap_cannot_change_best": true
+        },
+        "pharmacy": {
+          "in_radius": 29,
+          "kept": 20,
+          "dropped": 9,
+          "nearest_kept_m": 793.2,
+          "farthest_kept_m": 1511.5,
+          "nearest_dropped_m": 1525.0,
+          "cap_cannot_change_best": false
+        },
+        "medical": {
+          "in_radius": 71,
+          "kept": 20,
+          "dropped": 51,
+          "nearest_kept_m": 161.3,
+          "farthest_kept_m": 1215.3,
+          "nearest_dropped_m": 1215.3,
+          "cap_cannot_change_best": true
+        },
+        "park": {
+          "in_radius": 8,
+          "kept": 8,
+          "dropped": 0,
+          "nearest_kept_m": 585.6,
+          "farthest_kept_m": 2965.0,
+          "nearest_dropped_m": null,
+          "cap_cannot_change_best": true
+        }
+      },
+      "food_cafe_in_1km": 129
+    },
+    {
+      "id": "sejong-government-complex",
+      "label": "정부세종청사",
+      "nearest": {
+        "convenience": {
+          "in_radius": 108,
+          "kept": 20,
+          "dropped": 88,
+          "nearest_kept_m": 319.2,
+          "farthest_kept_m": 972.0,
+          "nearest_dropped_m": 985.3,
+          "cap_cannot_change_best": true
+        },
+        "grocery": {
+          "in_radius": 112,
+          "kept": 20,
+          "dropped": 92,
+          "nearest_kept_m": 331.3,
+          "farthest_kept_m": 1026.9,
+          "nearest_dropped_m": 1036.3,
+          "cap_cannot_change_best": true
+        },
+        "pharmacy": {
+          "in_radius": 94,
+          "kept": 20,
+          "dropped": 74,
+          "nearest_kept_m": 484.1,
+          "farthest_kept_m": 1103.1,
+          "nearest_dropped_m": 1146.1,
+          "cap_cannot_change_best": true
+        },
+        "medical": {
+          "in_radius": 262,
+          "kept": 20,
+          "dropped": 242,
+          "nearest_kept_m": 318.9,
+          "farthest_kept_m": 568.3,
+          "nearest_dropped_m": 568.3,
+          "cap_cannot_change_best": false
+        },
+        "park": {
+          "in_radius": 114,
+          "kept": 20,
+          "dropped": 94,
+          "nearest_kept_m": 117.4,
+          "farthest_kept_m": 1199.4,
+          "nearest_dropped_m": 1200.4,
+          "cap_cannot_change_best": true
+        }
+      },
+      "food_cafe_in_1km": 339
+    },
+    {
+      "id": "daejeon-cnu-gate",
+      "label": "충남대 앞 궁동 상권",
+      "nearest": {
+        "convenience": {
+          "in_radius": 273,
+          "kept": 20,
+          "dropped": 253,
+          "nearest_kept_m": 67.5,
+          "farthest_kept_m": 452.5,
+          "nearest_dropped_m": 459.0,
+          "cap_cannot_change_best": true
+        },
+        "grocery": {
+          "in_radius": 250,
+          "kept": 20,
+          "dropped": 230,
+          "nearest_kept_m": 41.1,
+          "farthest_kept_m": 698.7,
+          "nearest_dropped_m": 777.9,
+          "cap_cannot_change_best": true
+        },
+        "pharmacy": {
+          "in_radius": 129,
+          "kept": 20,
+          "dropped": 109,
+          "nearest_kept_m": 139.2,
+          "farthest_kept_m": 1058.2,
+          "nearest_dropped_m": 1069.5,
+          "cap_cannot_change_best": true
+        },
+        "medical": {
+          "in_radius": 451,
+          "kept": 20,
+          "dropped": 431,
+          "nearest_kept_m": 442.1,
+          "farthest_kept_m": 797.7,
+          "nearest_dropped_m": 797.7,
+          "cap_cannot_change_best": false
+        },
+        "park": {
+          "in_radius": 85,
+          "kept": 20,
+          "dropped": 65,
+          "nearest_kept_m": 94.8,
+          "farthest_kept_m": 1225.5,
+          "nearest_dropped_m": 1237.5,
+          "cap_cannot_change_best": true
+        }
+      },
+      "food_cafe_in_1km": 1308
+    },
+    {
+      "id": "cheongju-cbnu-gate",
+      "label": "충북대 정문",
+      "nearest": {
+        "convenience": {
+          "in_radius": 358,
+          "kept": 20,
+          "dropped": 338,
+          "nearest_kept_m": 237.3,
+          "farthest_kept_m": 648.6,
+          "nearest_dropped_m": 658.6,
+          "cap_cannot_change_best": true
+        },
+        "grocery": {
+          "in_radius": 344,
+          "kept": 20,
+          "dropped": 324,
+          "nearest_kept_m": 237.3,
+          "farthest_kept_m": 734.3,
+          "nearest_dropped_m": 736.3,
+          "cap_cannot_change_best": true
+        },
+        "pharmacy": {
+          "in_radius": 175,
+          "kept": 20,
+          "dropped": 155,
+          "nearest_kept_m": 444.4,
+          "farthest_kept_m": 883.5,
+          "nearest_dropped_m": 886.3,
+          "cap_cannot_change_best": false
+        },
+        "medical": {
+          "in_radius": 457,
+          "kept": 20,
+          "dropped": 437,
+          "nearest_kept_m": 444.4,
+          "farthest_kept_m": 759.1,
+          "nearest_dropped_m": 770.4,
+          "cap_cannot_change_best": false
+        },
+        "park": {
+          "in_radius": 92,
+          "kept": 20,
+          "dropped": 72,
+          "nearest_kept_m": 468.6,
+          "farthest_kept_m": 1284.7,
+          "nearest_dropped_m": 1357.6,
+          "cap_cannot_change_best": true
+        }
+      },
+      "food_cafe_in_1km": 743
+    }
+  ],
+  "review_samples": {
+    "convenience": [
+      {
+        "fid": 245958051296928,
+        "name": "지에스25공주대",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1425081,
+        "lat": 36.4723532,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/지에스25공주대,36.4723532,127.1425081"
+      },
+      {
+        "fid": 174187642311728,
+        "name": "미니스톱공주무령점",
+        "address_short": "충청남도 공주시 산성동",
+        "lon": 127.1237604,
+        "lat": 36.4567299,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/미니스톱공주무령점,36.4567299,127.1237604"
+      },
+      {
+        "fid": 120501369287005,
+        "name": "GS25옥룡주공점",
+        "address_short": "충청남도 공주시 옥룡동",
+        "lon": 127.1348026,
+        "lat": 36.4492112,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/GS25옥룡주공점,36.4492112,127.1348026"
+      },
+      {
+        "fid": 16773565273218,
+        "name": "세븐일레븐공주",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1347356,
+        "lat": 36.4685052,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/세븐일레븐공주,36.4685052,127.1347356"
+      },
+      {
+        "fid": 146736063431239,
+        "name": "지에스25공주반포",
+        "address_short": "충청남도 공주시 반포면",
+        "lon": 127.249927,
+        "lat": 36.3965597,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/지에스25공주반포,36.3965597,127.249927"
+      },
+      {
+        "fid": 267361396261255,
+        "name": "씨유공주대생활관점",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1450483,
+        "lat": 36.4703225,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/씨유공주대생활관점,36.4703225,127.1450483"
+      },
+      {
+        "fid": 36980746890958,
+        "name": "씨유공주예미지점",
+        "address_short": "충청남도 공주시 웅진동",
+        "lon": 127.1075268,
+        "lat": 36.4551145,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/씨유공주예미지점,36.4551145,127.1075268"
+      },
+      {
+        "fid": 216530432640863,
+        "name": "씨유공주뉴",
+        "address_short": "충청남도 공주시 중동",
+        "lon": 127.1250395,
+        "lat": 36.4543855,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/씨유공주뉴,36.4543855,127.1250395"
+      },
+      {
+        "fid": 269251484752004,
+        "name": "세븐일레븐동학사학봉점",
+        "address_short": "충청남도 공주시 반포면",
+        "lon": 127.2518178,
+        "lat": 36.3607071,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/세븐일레븐동학사학봉점,36.3607071,127.2518178"
+      },
+      {
+        "fid": 62386994265951,
+        "name": "씨유",
+        "address_short": "충청남도 공주시 옥룡동",
+        "lon": 127.1334393,
+        "lat": 36.4542683,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/씨유,36.4542683,127.1334393"
+      },
+      {
+        "fid": 157830470384447,
+        "name": "씨유공주유구점",
+        "address_short": "충청남도 공주시 유구읍",
+        "lon": 126.952654,
+        "lat": 36.5509646,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/씨유공주유구점,36.5509646,126.952654"
+      },
+      {
+        "fid": 249895314501369,
+        "name": "세븐일레븐공주신관한빛점",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1341831,
+        "lat": 36.4716239,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/세븐일레븐공주신관한빛점,36.4716239,127.1341831"
+      },
+      {
+        "fid": 134864848181774,
+        "name": "지에스25공주",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1307025,
+        "lat": 36.4719612,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/지에스25공주,36.4719612,127.1307025"
+      },
+      {
+        "fid": 109706758870521,
+        "name": "지에스25공주의당점",
+        "address_short": "충청남도 공주시 의당면",
+        "lon": 127.1474303,
+        "lat": 36.490866,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/지에스25공주의당점,36.490866,127.1474303"
+      },
+      {
+        "fid": 156042862441913,
+        "name": "GS25",
+        "address_short": "충청남도 공주시 옥룡동",
+        "lon": 127.1351378,
+        "lat": 36.4559606,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/GS25,36.4559606,127.1351378"
+      },
+      {
+        "fid": 91412435806957,
+        "name": "GS25주공명성점",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1453763,
+        "lat": 36.4726921,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/GS25주공명성점,36.4726921,127.1453763"
+      },
+      {
+        "fid": 56050268146405,
+        "name": "세븐일레븐공주신영휴게소점",
+        "address_short": "충청남도 공주시 유구읍",
+        "lon": 126.9718305,
+        "lat": 36.5842321,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/세븐일레븐공주신영휴게소점,36.5842321,126.9718305"
+      },
+      {
+        "fid": 167149910782010,
+        "name": "씨유공주번영점",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1483333,
+        "lat": 36.4727426,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/씨유공주번영점,36.4727426,127.1483333"
+      },
+      {
+        "fid": 237529158280692,
+        "name": "포시즌",
+        "address_short": "충청남도 공주시 반포면",
+        "lon": 127.210556,
+        "lat": 36.4337908,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/포시즌,36.4337908,127.210556"
+      },
+      {
+        "fid": 92922330126822,
+        "name": "이마트24공주차에너지점",
+        "address_short": "충청남도 공주시 동현동",
+        "lon": 127.1673495,
+        "lat": 36.4794221,
+        "biz_code": "G20405",
+        "map_link": "https://map.kakao.com/link/map/이마트24공주차에너지점,36.4794221,127.1673495"
+      }
+    ],
+    "convenience_population": 123,
+    "grocery": [
+      {
+        "fid": 233916628854669,
+        "name": "완균편의점",
+        "address_short": "충청남도 공주시 유구읍",
+        "lon": 126.9527182,
+        "lat": 36.5555786,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/완균편의점,36.5555786,126.9527182"
+      },
+      {
+        "fid": 166934159622880,
+        "name": "경천할인마트",
+        "address_short": "충청남도 공주시 계룡면",
+        "lon": 127.150314,
+        "lat": 36.3252271,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/경천할인마트,36.3252271,127.150314"
+      },
+      {
+        "fid": 25296876415241,
+        "name": "동원슈퍼",
+        "address_short": "충청남도 공주시 신풍면",
+        "lon": 126.9575547,
+        "lat": 36.5148032,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/동원슈퍼,36.5148032,126.9575547"
+      },
+      {
+        "fid": 147678188346909,
+        "name": "이인종합마트",
+        "address_short": "충청남도 공주시 이인면",
+        "lon": 127.0637997,
+        "lat": 36.3621449,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/이인종합마트,36.3621449,127.0637997"
+      },
+      {
+        "fid": 124252922140382,
+        "name": "레스토랑하나로",
+        "address_short": "충청남도 공주시 유구읍",
+        "lon": 126.9536024,
+        "lat": 36.5526412,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/레스토랑하나로,36.5526412,126.9536024"
+      },
+      {
+        "fid": 36763565761692,
+        "name": "공주케이토탈",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1343217,
+        "lat": 36.4743272,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/공주케이토탈,36.4743272,127.1343217"
+      },
+      {
+        "fid": 189151109928082,
+        "name": "계룡산온천매점;세신",
+        "address_short": "충청남도 공주시 반포면",
+        "lon": 127.2526701,
+        "lat": 36.36586,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/계룡산온천매점;세신,36.36586,127.2526701"
+      },
+      {
+        "fid": 174951563977218,
+        "name": "주미미니슈퍼",
+        "address_short": "충청남도 공주시 주미동",
+        "lon": 127.1013302,
+        "lat": 36.4253093,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/주미미니슈퍼,36.4253093,127.1013302"
+      },
+      {
+        "fid": 207174472719040,
+        "name": "광창상회",
+        "address_short": "충청남도 공주시 산성동",
+        "lon": 127.1240856,
+        "lat": 36.4577929,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/광창상회,36.4577929,127.1240856"
+      },
+      {
+        "fid": 249008357579938,
+        "name": "브라보아이스크림",
+        "address_short": "충청남도 공주시 신관동",
+        "lon": 127.1360283,
+        "lat": 36.4739828,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/브라보아이스크림,36.4739828,127.1360283"
+      },
+      {
+        "fid": 162778819888143,
+        "name": "국고개슈퍼",
+        "address_short": "충청남도 공주시 산성동",
+        "lon": 127.1278645,
+        "lat": 36.4560317,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/국고개슈퍼,36.4560317,127.1278645"
+      },
+      {
+        "fid": 219904209777104,
+        "name": "신군상회",
+        "address_short": "충청남도 공주시 신풍면",
+        "lon": 126.9926983,
+        "lat": 36.5195776,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/신군상회,36.5195776,126.9926983"
+      },
+      {
+        "fid": 196230690028157,
+        "name": "금강슈퍼",
+        "address_short": "충청남도 공주시 금흥동",
+        "lon": 127.1486203,
+        "lat": 36.4828262,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/금강슈퍼,36.4828262,127.1486203"
+      },
+      {
+        "fid": 178162262063254,
+        "name": "와룡",
+        "address_short": "충청남도 공주시 의당면",
+        "lon": 127.1474846,
+        "lat": 36.4959755,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/와룡,36.4959755,127.1474846"
+      },
+      {
+        "fid": 228766672842899,
+        "name": "유진할인마트",
+        "address_short": "충청남도 공주시 계룡면",
+        "lon": 127.1374522,
+        "lat": 36.3259365,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/유진할인마트,36.3259365,127.1374522"
+      },
+      {
+        "fid": 226263028566486,
+        "name": "정은모",
+        "address_short": "충청남도 공주시 정안면",
+        "lon": 127.1191144,
+        "lat": 36.6062179,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/정은모,36.6062179,127.1191144"
+      },
+      {
+        "fid": 191191076089396,
+        "name": "대박마트",
+        "address_short": "충청남도 공주시 산성동",
+        "lon": 127.1228706,
+        "lat": 36.458398,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/대박마트,36.458398,127.1228706"
+      },
+      {
+        "fid": 100858668238449,
+        "name": "구판장",
+        "address_short": "충청남도 공주시 계룡면",
+        "lon": 127.1644295,
+        "lat": 36.3594805,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/구판장,36.3594805,127.1644295"
+      },
+      {
+        "fid": 152244194493549,
+        "name": "원마트",
+        "address_short": "충청남도 공주시 웅진동",
+        "lon": 127.107695,
+        "lat": 36.4557632,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/원마트,36.4557632,127.107695"
+      },
+      {
+        "fid": 18503436466081,
+        "name": "신세계유통",
+        "address_short": "충청남도 공주시 산성동",
+        "lon": 127.1243542,
+        "lat": 36.4583333,
+        "biz_code": "G20404",
+        "map_link": "https://map.kakao.com/link/map/신세계유통,36.4583333,127.1243542"
+      }
+    ],
+    "grocery_population": 227
+  }
+}

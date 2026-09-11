@@ -3,9 +3,12 @@
 계산 core(app/analysis)와 adapter(app/adapters)를 연결한다. core는 여전히 I/O를
 모르고, 이 모듈만 둘을 안다.
 
-지원 지역 판정: v2.3 4-4의 `region.supported`는 충청권 폴리곤으로 정해야 하는데
-그 폴리곤 파일은 아직 없다. 지금은 데이터 추출 경계 상자를 임시 기준으로 쓰고
-`verified_area`는 항상 False다. **폴리곤이 정해지면 이 부분을 교체한다.**
+지원 지역 판정: v2.3 4-4의 `region.supported`는 **충청권 행정경계 폴리곤**으로 한다
+(`app/region.py`). 이전에는 OSM 추출 경계 상자를 임시로 썼는데, 사각형이라 경기
+남부·전북 북부처럼 충청권이 아닌 곳도 "지원"이라고 답했다.
+
+`verified_area`는 여전히 항상 False다. v2.3 3절의 "실측 검증" 배지는 공주 실측
+구역에만 붙는데 실측이 Week 6이라 그 구역 폴리곤이 아직 없다.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from pathlib import Path
 from app.adapters.osrm import OsrmClient
 from app.adapters.poi import PoiRepository
 from app.analysis.cache import AnalyzeCache
-from app.analysis.coords import normalize_coord
+from app.analysis.coords import cache_key, normalize_coord
 from app.analysis.core import ResultCache, analyze
 from app.analysis.models import AnalyzeResult, Candidate, RegionInfo, Snap, TableResult
 from app.contract import (
@@ -28,22 +31,19 @@ from app.contract import (
     NEAREST_RADIUS_M,
     NEAREST_TOP_N,
 )
+from app.region import REGION_LABEL, UNSUPPORTED_LABEL, load_region
 from app.request_log import RequestMetrics
 from app.settings import Settings
 
-# 데이터 추출 경계 상자(data/osrm/chungcheong.geojson)와 같은 값.
-# 지원 지역 폴리곤이 정해지기 전까지 쓰는 임시 기준이다.
-EXTRACT_BBOX = (125.9, 35.7, 128.3, 37.3)
-REGION_LABEL = "충청권"
-
 
 def region_for(lon: float, lat: float) -> RegionInfo:
-    min_lon, min_lat, max_lon, max_lat = EXTRACT_BBOX
-    inside = min_lon <= lon <= max_lon and min_lat <= lat <= max_lat
+    """v2.3 4-4 `region`. 판정 기준은 충청권 행정경계 폴리곤이다."""
+    inside = load_region().contains(lon, lat)
     return RegionInfo(
         supported=inside,
-        label=REGION_LABEL if inside else "지원하지 않는 지역",
+        label=REGION_LABEL if inside else UNSUPPORTED_LABEL,
         # 실측 검증 배지는 공주 실측 구역 폴리곤이 생긴 뒤에만 켠다(v2.3 3절).
+        # 실측이 Week 6이라 그 폴리곤이 아직 없다.
         verified_area=False,
     )
 
@@ -61,6 +61,11 @@ class AnalysisService:
             raise RuntimeError("분석에 필요한 데이터나 OSRM 설정이 없다")
         poi_path = settings.poi_path
         assert poi_path is not None  # analysis_ready가 보장한다
+        # 폴리곤을 서비스를 만들 때 한 번 읽는다. 요청마다 지연 로드하는 것보다
+        # 낫지만, **서비스 자체가 첫 요청에서 만들어지므로**(main.get_service)
+        # 파일이 빠졌다면 프로세스 기동이 아니라 첫 `/api/analyze`에서 드러난다.
+        # 배포 직후 스모크가 곧바로 analyze를 치므로 실제로는 그때 잡힌다.
+        load_region()
         return cls(
             settings,
             poi=PoiRepository(poi_path),
@@ -74,9 +79,34 @@ class AnalysisService:
         norm_lon = normalize_coord(lon)
         norm_lat = normalize_coord(lat)
 
+        # **후보를 뽑기 전에 캐시를 본다** (v2.3 4-3: 2단계 캐시 조회, 4단계 후보 추출).
+        #
+        # 순서가 거꾸로였다. 합성 데이터(920행)에서는 티가 나지 않았지만 실데이터
+        # (123,963행)에서는 GeoPackage 조회 6회가 요청마다 돌아 **캐시 히트에도
+        # 서버에서 약 1초가 걸렸다.** 조회 결과는 히트면 쓰지도 않는다.
+        region = region_for(norm_lon, norm_lat)
+
         coordinates: dict[int, tuple[float, float]] = {}
-        nearest_candidates = self._nearest_candidates(norm_lon, norm_lat, coordinates)
-        density_candidates = self._density_candidates(norm_lon, norm_lat, coordinates)
+        nearest_candidates: dict[str, list[Candidate]] = {}
+        density_candidates: list[Candidate] = []
+
+        if region.supported:
+            key = cache_key(
+                data_version=str(self._settings.data_version),
+                time_model_version=self._settings.time_model_version,
+                lon=norm_lon,
+                lat=norm_lat,
+            )
+            hit = self._cache.get(key)
+            if hit is not None:
+                if metrics is not None:
+                    metrics.cache = "hit"
+                return hit
+            nearest_candidates = self._nearest_candidates(norm_lon, norm_lat, coordinates)
+            density_candidates = self._density_candidates(norm_lon, norm_lat, coordinates)
+
+        # 지역 밖이면 후보를 뽑지 않고 빈 채로 넘긴다. core가 1단계에서 OUT_OF_REGION을
+        # 던지므로 빈 값은 쓰이지 않는다. 오류 문구를 두 곳에 적지 않으려고 이렇게 한다.
 
         snap_holder: list[Snap] = []
 
@@ -105,7 +135,7 @@ class AnalysisService:
         return analyze(
             lon=norm_lon,
             lat=norm_lat,
-            region=region_for(norm_lon, norm_lat),
+            region=region,
             data_version=str(self._settings.data_version),
             time_model_version=self._settings.time_model_version,
             poi_date=_required_poi_date(self._settings.poi_date),

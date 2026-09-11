@@ -63,12 +63,24 @@ jobs:
           context: api
           file: api/Dockerfile
           platforms: linux/amd64
-          # PR에서는 false — 빌드만 확인한다.
+          # PR에서는 게재하지 않는다.
           push: ${{ github.event_name != 'pull_request' }}
+          # 대신 로컬 도커로 불러온다. 아래 기동 검사가 `docker run`을 하는데,
+          # 게재하지도 불러오지도 않으면 이미지가 어디에도 없어 `manifest unknown`이
+          # 난다(이 검사를 처음 넣었을 때 실제로 그랬다).
+          load: ${{ github.event_name == 'pull_request' }}
           provenance: false
           tags: ghcr.io/${{ github.repository_owner }}/geoleobom-api:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 빌드 성공은 기동 성공이 아니다. 실제로 겪었다 — httpx가 dev 의존성이라
+      # 이미지는 멀쩡히 빌드됐는데 컨테이너가 ModuleNotFoundError로 죽었다.
+      # 한 줄이면 그 종류를 여기서 잡는다. PR에서는 위의 load로 들어온 이미지를,
+      # main에서는 방금 게재한 이미지를 쓴다. 태그가 같아 명령은 하나면 된다.
+      - name: Check the image actually starts
+        run: |
+          docker run --rm --network none             ghcr.io/${{ github.repository_owner }}/geoleobom-api:${{ github.sha }}             python -c "import app.main; print('app.main imported')"
 
       - name: Record the published reference
         run: |

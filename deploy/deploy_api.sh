@@ -98,6 +98,20 @@ if [[ "\$RUNNING" != "\$WANTED" ]]; then
 	exit 1
 fi
 echo "실행 중 image id: \$RUNNING"
+
+# Caddyfile은 바인드 마운트라 내용이 바뀌어도 compose가 컨테이너를 재생성하지
+# 않는다. 복사만 하고 끝내면 **새 설정이 적용되지 않는다.** 실제로 겪었다 —
+# 오류 로그 정제를 고쳐 올렸는데 옛 설정이 계속 돌았다.
+#
+# `caddy reload`는 먼저 설정을 검증하고 실패하면 돌던 설정을 그대로 둔다.
+# 그래서 잘못된 Caddyfile을 올려도 서비스가 끊기지 않는다.
+if docker exec geoleobom-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+	echo "Caddy 설정 재적용 완료"
+else
+	echo "Caddy 설정 재적용 실패 — 돌던 설정이 유지된다. Caddyfile을 확인해라" >&2
+	exit 1
+fi
+
 docker compose -f compose.yaml ps
 REMOTE
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "배포 스모크 5좌표 (v2.3 5절 '픽스처 5좌표 스모크 테스트', 10절 게이트 2 '픽스처 5좌표의 기대값을 기록'). 좌표는 4-2 규약대로 [lon, lat] 5자리다. 실제 장소이므로 실데이터 배포본에서도 같은 좌표를 쓴다. 기대값만 data_version마다 달라진다.",
+  "_comment": "배포 스모크 5좌표 (v2.3 5절 '픽스처 5좌표 스모크 테스트', 10절 게이트 2 '픽스처 5좌표의 기대값을 기록'). 좌표는 4-2 규약대로 [lon, lat] 5자리다. 실제 장소이므로 데이터 배포본이 바뀌어도 같은 좌표를 쓴다. 기대값만 달라진다.",
   "coords": [
     {
       "id": "gongju-knu-gate",
@@ -27,11 +27,11 @@
     },
     {
       "id": "daejeon-cnu-gate",
-      "label": "충남대 정문",
-      "lon": 127.345,
-      "lat": 36.368,
+      "label": "충남대 앞 궁동 상권",
+      "lon": 127.34802,
+      "lat": 36.36203,
       "density_profile": "extra_batch",
-      "profile_note": "추가 배치 두 번째 사례"
+      "profile_note": "추가 배치 두 번째 사례. 2026-09-11 좌표 정정 — 이전 값(127.34500, 36.36800)은 캠퍼스 안쪽이라 실데이터에서 1km 내 595곳 중 10분 안에 7곳뿐이었고 최근접 시설이 모두 500m 밖이었다. 실데이터의 궁동 카페·음식점 377곳 중심으로 옮겼다."
     },
     {
       "id": "cheongju-cbnu-gate",
@@ -41,5 +41,7 @@
       "density_profile": "capped",
       "profile_note": "capped"
     }
-  ]
+  ],
+  "_baseline_note": "**좌표를 바꾸면 모든 data_version의 기준값(deploy/smoke_baseline/)이 무효가 된다.** 기준값은 '이 좌표에서 이 배포본이 내는 답'이기 때문이다. 바꾼 뒤에는 다시 기록해야 한다.",
+  "_profile_note": "density_profile은 **합성 배포본(synthetic-cc-01)을 설계할 때 쓰는 값**이다. data/make_deploy_fixture.py가 이 값을 보고 POI를 배치하고, smoke.py --expect-profile이 그 설계대로 동작했는지 확인한다. 실데이터 배포본에는 적용하지 않는다."
 }

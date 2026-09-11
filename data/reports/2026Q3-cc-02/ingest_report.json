@@ -1,0 +1,34 @@
+{
+  "rows": 123963,
+  "poi_date": "2022-11-21",
+  "read": {
+    "상가정보": 314840,
+    "HIRA medical": 79772,
+    "HIRA pharmacy": 25760,
+    "공원": 18202
+  },
+  "kept": {
+    "food_cafe": 96197,
+    "grocery": 8314,
+    "convenience": 6557,
+    "medical": 7927,
+    "pharmacy": 2719,
+    "park": 2249
+  },
+  "dropped": {
+    "상가: 대상 업종 아님": 202268,
+    "HIRA medical: 충청권 밖 시도": 71837,
+    "HIRA medical: 좌표 없음": 1,
+    "HIRA pharmacy: 충청권 밖 시도": 23037,
+    "공원: 충청권 밖 주소": 15945,
+    "공원: 제외 구분(묘지공원)": 3,
+    "공원: 지원 폴리곤 밖": 1,
+    "같은 이름·같은 자리 중복(food_cafe)": 1335,
+    "같은 이름·같은 자리 중복(convenience)": 112,
+    "같은 이름·같은 자리 중복(grocery)": 57,
+    "같은 이름·같은 자리 중복(medical)": 7,
+    "같은 이름·같은 자리 중복(pharmacy)": 4,
+    "같은 이름·같은 자리 중복(park)": 4
+  },
+  "region_polygon": "..\\api\\app\\region_data\\chungcheong.geojson"
+}
