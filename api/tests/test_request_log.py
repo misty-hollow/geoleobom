@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import logging
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -175,3 +176,22 @@ def test_libraries_that_log_osrm_urls_are_kept_quiet():
             assert not logging.getLogger(name).isEnabledFor(logging.INFO), name
     finally:
         root.setLevel(original)
+
+
+# --- 문서의 실행 예시도 5절을 지켜야 한다 -------------------------------------
+
+
+def test_documented_local_run_commands_disable_the_default_access_log():
+    """README의 uvicorn 명령에 `--no-access-log`가 빠지면 좌표가 로그에 남는다.
+
+    이미지(`api/Dockerfile`)에는 붙어 있었는데 **문서의 로컬 실행 예시에는 없었다.**
+    그대로 따라 하면 개발 PC 콘솔에
+        "GET /api/analyze?lon=127.14020&lat=36.47130 HTTP/1.1"
+    가 찍힌다. v2.3 5절은 "좌표 원문·쿼리 문자열은 Caddy와 API 로그 **모두에서**
+    제외한다"이고, 로컬만 예외라고 적어 두지 않았다.
+    """
+    readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
+    commands = [line for line in readme.splitlines() if "-m uvicorn" in line]
+    assert commands, "README에 uvicorn 실행 예시가 없다"
+    for line in commands:
+        assert "--no-access-log" in line, f"기본 접근 로그를 끄지 않는다: {line.strip()}"

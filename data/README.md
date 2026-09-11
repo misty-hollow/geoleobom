@@ -37,9 +37,11 @@ cd data
 # 1) 원본 조사 — 매핑표 주석의 숫자를 다시 뽑는다
 .venv/Scripts/python.exe -m data.survey --raw-dir raw
 
-# 2) 정제 CSV (충청권 필터 + 매핑 + 중복·결측 + 안정적인 fid)
+# 2) 정제 CSV (수집 폴리곤 필터 + 매핑 + 중복·결측 + 안정적인 fid)
+#    거르는 것은 **수집 폴리곤**(지원 + 3km)이다. --region은 여유 구간을 세는 데만 쓴다.
 .venv/Scripts/python.exe -m data.ingest --raw-dir raw \
     --region ../api/app/region_data/chungcheong.geojson \
+    --collection-region region_data/chungcheong_poi_collection.geojson \
     --out build/<버전>/poi.csv --report build/<버전>/ingest_report.json
 
 # 3) GeoPackage
@@ -53,8 +55,43 @@ cd data
     --out build/<버전>/gate2_quality.json
 ```
 
-`validate_gpkg`는 R*Tree 존재와 `rtree.id = poi.fid` 연결, 좌표 범위, 카테고리 분포,
-`lon`/`lat`와 geometry 일치를 확인한다. 통과해야 버전 디렉터리에 배치한다.
+`<버전>`은 **새 `data_version`**이다. 서버에 이미 올라간 이름을 재사용하지 않는다 —
+`deploy/deploy_data.sh`가 기존 버전에 덮어쓰는 것을 거부한다.
+
+`validate_gpkg`가 확인하는 것:
+
+- `poi`·R*Tree 테이블 존재, `rtree.id = poi.fid` 양방향 연결
+- 좌표 범위·결측, v2.3 6항목 카테고리 분포
+- R*Tree bbox와 `lon`/`lat` 컬럼의 일치
+- **geometry BLOB을 실제로 풀어** `lon`/`lat` 컬럼과 같은 점인지
+- **GeoPackage 메타데이터** — `gpkg_contents`·`gpkg_geometry_columns`의 data_type·
+  geometry 타입(POINT)·SRS(4326)·z/m 차원
+- category 인덱스 존재
+
+통과해야 버전 디렉터리에 배치한다. 서버는 geometry를 해석하지 않고 `lon`/`lat`만
+읽으므로(v2.3 1-2), **둘이 갈라지면 아무도 눈치채지 못한 채 거리 계산이 틀어진다.**
+그래서 검증 쪽에서는 geometry를 풀어 본다.
+
+## POI 수집 범위 = 지원 경계 + 3km
+
+v2.3 1-3: "데이터 추출 범위 = 서비스 경계 + **시설 검색 여유(3km)** + 경로 우회 여유".
+지원 판정 폴리곤으로 딱 잘라 넣으면 경계 근처 좌표의 3km 반경 안에 실재하는 시설이
+배포본에서 빠진다. 폴리곤이 두 개인 이유다.
+
+| 폴리곤 | 파일 | 쓰는 곳 |
+|---|---|---|
+| 지원 판정 | `api/app/region_data/chungcheong.geojson` | 서버 `region.supported` |
+| POI 수집 | `data/region_data/chungcheong_poi_collection.geojson` | ingest 필터 (지원 + 3km) |
+
+수집 폴리곤은 지원 폴리곤을 **EPSG:5179에서 미터로** 3km 부풀린 것이다(3km는 거리이지
+각도가 아니라서 도 단위 버퍼는 한쪽이 어긋난다). 두 파일은 같은 원본에서 함께 나오고
+`version`이 같아야 하며, ingest가 그것을 확인한다.
+
+수집 폴리곤에 **닿는 시도**는 파일의 `touching_sido`에 적혀 있고, 행정경계와의 실제
+교차로 구한 값이다. `data/data/sources.py`의 `COMMERCE_REGION_BY_SIDO`가 그 목록과
+맞아야 상가 원본(시도별 파일)을 빠짐없이 읽는다 — `test_collection_region.py`가 검사한다.
+**인천이 목록에 있는 것은 오타가 아니다**: 옹진군 섬이 충남 서해 도서와 3km 안이다.
+"육지에서 맞닿은 시도"로 짐작했으면 빠뜨렸을 것이다.
 
 ## 매핑표는 기록이지 판단이 아니다
 
@@ -92,14 +129,18 @@ docker run --rm --entrypoint osmium -v "<work>:/work" geoleobom/osmium:local \
   export /work/kr-admin4.osm.pbf -f geojsonseq --overwrite -o /work/kr-admin4.geojsonl \
   -u type_id --geometry-types=polygon
 
+# 지원 폴리곤과 수집 폴리곤을 **함께** 만든다. 둘의 version이 같아야 한다.
 cd data
 .venv/Scripts/python.exe -m data.make_region_polygon \
     --geojsonl osrm/build/kr-admin4.geojsonl \
-    --out ../api/app/region_data/chungcheong.geojson --version osm-2026-09-11
+    --out ../api/app/region_data/chungcheong.geojson \
+    --out-collection region_data/chungcheong_poi_collection.geojson \
+    --version osm-2026-09-11
 ```
 
 단순화는 **바깥쪽으로만** 한다. 안쪽으로 깎이면 실제 충청권 주민이 "지원하지 않는
 지역"을 보게 되므로, 부풀린 뒤 줄이고 원본을 덮는지 `contains`로 확인한다.
+수집 폴리곤도 같은 방식으로 "지원 + 3km"를 덮는지 확인하고, 못 덮으면 멈춘다.
 
 ## OSRM 그래프
 
