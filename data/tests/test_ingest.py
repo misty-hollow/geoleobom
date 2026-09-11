@@ -176,7 +176,19 @@ def test_same_shop_at_the_same_spot_is_kept_once():
     stats = Stats()
     rows = [_row(source_id="a"), _row(source_id="b"), _row(source_id="c")]
     assert len(deduplicate(rows, stats)) == 1
-    assert stats.dropped["같은 이름·같은 자리 중복"] == 2
+    assert stats.dropped["같은 이름·같은 자리 중복(convenience)"] == 2
+
+
+def test_dedupe_keeps_a_deterministic_row_not_the_first_one():
+    """**남길 행을 입력 순서로 정하면 fid가 흔들린다.**
+
+    원본의 행 순서는 분기마다 바뀔 수 있다. "먼저 온 행"을 남기면 그때마다 남는
+    행이 달라지고, fid가 `(source, source_id)`에서 나오므로 fid도 달라진다.
+    그러면 수정표가 사라진 시설을 가리킨다. `source_id` 최솟값으로 고정한다.
+    """
+    rows = [_row(source_id="c"), _row(source_id="a"), _row(source_id="b")]
+    assert deduplicate(list(rows), Stats())[0]["source_id"] == "a"
+    assert deduplicate(list(reversed(rows)), Stats())[0]["source_id"] == "a"
 
 
 def test_same_name_at_a_different_spot_is_kept():

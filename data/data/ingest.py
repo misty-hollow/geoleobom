@@ -284,11 +284,15 @@ def deduplicate(rows: list[dict], stats: Stats) -> list[dict]:
     원본에 층·호수만 다른 같은 가게가 여러 줄 있는 경우가 있다. 그대로 두면
     최근접 후보 20개가 같은 가게로 채워져 다른 시설을 밀어낸다(v2.3 4-3 4단계).
 
-    **좌표가 다르면 남긴다.** 실제로 다른 지점일 수 있으므로 위치까지 같을 때만
-    묶는다. 먼저 온 행을 남기고 원본 순서를 유지한다.
+    **좌표가 다르면 남긴다.** 실제로 다른 지점일 수 있으므로 위치까지 같을 때만 묶는다.
+
+    **남길 행은 `source_id`가 가장 작은 것으로 정한다.** "먼저 온 행"으로 두면 원본의
+    행 순서가 바뀔 때 남는 행이 달라지고, 그러면 그 행의 fid도 달라진다. fid를
+    원본 식별자에서 유도한 이유(수정표가 계속 같은 시설을 가리키게 하는 것)가
+    여기서 깨진다. 실데이터에서 이렇게 묶이는 행이 1,519개였다.
     """
-    seen: set[tuple[str, str, float, float]] = set()
-    kept: list[dict] = []
+    groups: dict[tuple[str, str, float, float], list[dict]] = {}
+    order: list[tuple[str, str, float, float]] = []
     for row in rows:
         key = (
             str(row["category"]),
@@ -296,11 +300,17 @@ def deduplicate(rows: list[dict], stats: Stats) -> list[dict]:
             round(float(row["lon"]), DEDUPE_PRECISION),
             round(float(row["lat"]), DEDUPE_PRECISION),
         )
-        if key in seen:
-            stats.dropped["같은 이름·같은 자리 중복"] += 1
-            continue
-        seen.add(key)
-        kept.append(row)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(row)
+
+    kept: list[dict] = []
+    for key in order:
+        members = groups[key]
+        if len(members) > 1:
+            stats.dropped[f"같은 이름·같은 자리 중복({key[0]})"] += len(members) - 1
+        kept.append(min(members, key=lambda r: (str(r["source"]), str(r["source_id"]))))
     return kept
 
 

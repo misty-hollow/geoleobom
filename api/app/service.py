@@ -61,6 +61,9 @@ class AnalysisService:
             raise RuntimeError("분석에 필요한 데이터나 OSRM 설정이 없다")
         poi_path = settings.poi_path
         assert poi_path is not None  # analysis_ready가 보장한다
+        # 폴리곤을 여기서 한 번 읽는다. 지연 로드로 두면 파일이 빠졌을 때
+        # **첫 요청이 500으로 죽을 때까지** 아무도 모른다. 기동에서 멈추는 편이 낫다.
+        load_region()
         return cls(
             settings,
             poi=PoiRepository(poi_path),

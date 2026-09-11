@@ -5,7 +5,7 @@
     "lat": 36.4713,
     "summary": {
       "versions": {
-        "data_version": "2026Q3-cc-01",
+        "data_version": "2026Q3-cc-02",
         "time_model_version": "tm1",
         "poi_date": "2022-11-21"
       },
@@ -81,7 +81,7 @@
     "lat": 36.4468,
     "summary": {
       "versions": {
-        "data_version": "2026Q3-cc-01",
+        "data_version": "2026Q3-cc-02",
         "time_model_version": "tm1",
         "poi_date": "2022-11-21"
       },
@@ -157,7 +157,7 @@
     "lat": 36.504,
     "summary": {
       "versions": {
-        "data_version": "2026Q3-cc-01",
+        "data_version": "2026Q3-cc-02",
         "time_model_version": "tm1",
         "poi_date": "2022-11-21"
       },
@@ -233,7 +233,7 @@
     "lat": 36.36203,
     "summary": {
       "versions": {
-        "data_version": "2026Q3-cc-01",
+        "data_version": "2026Q3-cc-02",
         "time_model_version": "tm1",
         "poi_date": "2022-11-21"
       },
@@ -309,7 +309,7 @@
     "lat": 36.628,
     "summary": {
       "versions": {
-        "data_version": "2026Q3-cc-01",
+        "data_version": "2026Q3-cc-02",
         "time_model_version": "tm1",
         "poi_date": "2022-11-21"
       },

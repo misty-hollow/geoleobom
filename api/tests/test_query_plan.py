@@ -83,11 +83,16 @@ def test_query_plan_scans_the_rtree_first(dense_gpkg):
     plan = _plan(dense_gpkg, sql, params)
     assert plan, "계획이 비었다"
     joined = " | ".join(plan)
-    rtree_line = next((i for i, line in enumerate(plan) if "rtree_poi_geom" in line), None)
-    category_line = next((i for i, line in enumerate(plan) if "idx_poi_category" in line), None)
-    assert rtree_line is not None, joined
-    if category_line is not None:
-        assert rtree_line < category_line or "SEARCH p USING INDEX" in plan[category_line], joined
+
+    # R*Tree를 훑는 줄이 있어야 한다.
+    assert any("rtree_poi_geom" in line for line in plan), joined
+
+    # **핵심 단언**: `poi`를 rowid로 찾아야 한다. `(category=? AND rowid=?)`는
+    # IN 목록(R*Tree 결과)이 구동한다는 뜻이다. 그냥 `(category=?)`이면 그
+    # 카테고리 전체를 훑는 나쁜 계획이다 — 두 문자열이 비슷해 구별해야 한다.
+    poi_search = next((line for line in plan if line.startswith("SEARCH p")), None)
+    assert poi_search is not None, joined
+    assert "rowid=?" in poi_search, f"poi를 rowid로 찾지 않는다: {poi_search}"
 
 
 def test_the_old_join_shape_picks_the_bad_plan(dense_gpkg):

@@ -22,8 +22,11 @@ Geofabrik `south-korea-latest.osm.pbf`의 `admin_level=4` 관계에서 네 시�
 ## 판정을 어디서 하나
 
 `api/app/region.py`가 **같은 파일을 표준 라이브러리만으로** 읽어 같은 판정을 한다.
-서버에 shapely를 넣지 않기 위해서다(v2.3 1-2와 같은 경계). 두 구현이 같은 답을
-내는지는 `data/tests/test_region_polygon.py`가 확인한다.
+서버에 shapely를 넣지 않기 위해서다(v2.3 1-2와 같은 경계).
+
+이 모듈은 ingest가 쓰고, 서버는 `api/app/region.py`를 쓴다. 두 구현은 같은 알고리즘을
+따로 적은 것이므로 답이 갈릴 수 있다. 갈리면 ingest가 넣은 POI를 서버가 지역 밖으로
+판정하는 일이 생긴다.
 """
 
 from __future__ import annotations
