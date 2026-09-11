@@ -23,6 +23,7 @@ from app.adapters.poi import PoiRepository
 from app.analysis.cache import AnalyzeCache
 from app.analysis.coords import cache_key, normalize_coord
 from app.analysis.core import ResultCache, analyze
+from app.analysis.gate import AnalysisGate
 from app.analysis.models import AnalyzeResult, Candidate, RegionInfo, Snap, TableResult
 from app.contract import (
     DENSITY_CATEGORY,
@@ -54,6 +55,13 @@ class AnalysisService:
         self._poi = poi
         self._osrm = osrm
         self._cache = AnalyzeCache()
+        # v2.3 5절 "분석 동시 실행 4". 자리를 기다리는 시간은 분석 시간 예산과 같게 둔다.
+        self._gate = AnalysisGate(wait_timeout_s=settings.analysis_budget_s)
+
+    @property
+    def gate(self) -> AnalysisGate:
+        """동시 실행 제한. 검사와 보고가 읽는다."""
+        return self._gate
 
     @classmethod
     def from_settings(cls, settings: Settings) -> AnalysisService:
@@ -86,28 +94,68 @@ class AnalysisService:
         # 서버에서 약 1초가 걸렸다.** 조회 결과는 히트면 쓰지도 않는다.
         region = region_for(norm_lon, norm_lat)
 
-        coordinates: dict[int, tuple[float, float]] = {}
-        nearest_candidates: dict[str, list[Candidate]] = {}
-        density_candidates: list[Candidate] = []
-
-        if region.supported:
-            key = cache_key(
-                data_version=str(self._settings.data_version),
-                time_model_version=self._settings.time_model_version,
+        if not region.supported:
+            # core가 1단계에서 OUT_OF_REGION을 던진다. 오류 문구를 두 곳에 적지 않으려고
+            # 여기서 직접 raise하지 않는다. 후보도 OSRM도 건드리지 않으므로 동시 실행
+            # 자리를 잡지 않는다.
+            return self._run(
                 lon=norm_lon,
                 lat=norm_lat,
+                region=region,
+                nearest_candidates={},
+                density_candidates=[],
+                coordinates={},
+                metrics=metrics,
             )
+
+        key = cache_key(
+            data_version=str(self._settings.data_version),
+            time_model_version=self._settings.time_model_version,
+            lon=norm_lon,
+            lat=norm_lat,
+        )
+        hit = self._cache.get(key)
+        if hit is not None:
+            if metrics is not None:
+                metrics.cache = "hit"
+            return hit
+
+        # 여기부터가 **실제 분석 진입**이다 — GeoPackage 조회와 OSRM 호출이 있다.
+        # v2.3 5절의 "분석 동시 실행 4"는 이 구간을 센다. 캐시 히트와 지역 밖은 위에서
+        # 이미 돌아갔으므로 자리를 잡지 않는다.
+        with self._gate.enter():
+            # 기다리는 동안 다른 요청이 같은 좌표를 계산해 두었을 수 있다. 한 번 더 본다.
             hit = self._cache.get(key)
             if hit is not None:
                 if metrics is not None:
                     metrics.cache = "hit"
                 return hit
+
+            coordinates: dict[int, tuple[float, float]] = {}
             nearest_candidates = self._nearest_candidates(norm_lon, norm_lat, coordinates)
             density_candidates = self._density_candidates(norm_lon, norm_lat, coordinates)
+            return self._run(
+                lon=norm_lon,
+                lat=norm_lat,
+                region=region,
+                nearest_candidates=nearest_candidates,
+                density_candidates=density_candidates,
+                coordinates=coordinates,
+                metrics=metrics,
+            )
 
-        # 지역 밖이면 후보를 뽑지 않고 빈 채로 넘긴다. core가 1단계에서 OUT_OF_REGION을
-        # 던지므로 빈 값은 쓰이지 않는다. 오류 문구를 두 곳에 적지 않으려고 이렇게 한다.
-
+    def _run(
+        self,
+        *,
+        lon: float,
+        lat: float,
+        region: RegionInfo,
+        nearest_candidates: dict[str, list[Candidate]],
+        density_candidates: list[Candidate],
+        coordinates: dict[int, tuple[float, float]],
+        metrics: RequestMetrics | None,
+    ) -> AnalyzeResult:
+        """후보가 준비된 상태에서 계산 core를 돌린다. 좌표는 이미 정규화돼 있다."""
         snap_holder: list[Snap] = []
 
         def snap_origin(origin_lon: float, origin_lat: float) -> Snap | None:
@@ -133,8 +181,8 @@ class AnalysisService:
         )
 
         return analyze(
-            lon=norm_lon,
-            lat=norm_lat,
+            lon=lon,
+            lat=lat,
             region=region,
             data_version=str(self._settings.data_version),
             time_model_version=self._settings.time_model_version,
