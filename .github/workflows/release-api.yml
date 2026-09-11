@@ -1,0 +1,79 @@
+# API 이미지를 GHCR에 게재한다.
+#
+# 2026-09-11 사용자 승인: "GitHub Actions가 main 병합마다
+# ghcr.io/misty-hollow/geoleobom-api:<커밋 SHA>를 빌드·게재. latest 태그 금지."
+#
+# 서버에서 빌드하지 않는다(v2.3 4-1). 저장소가 공개이므로 패키지도 공개로 두어
+# 서버에 레지스트리 토큰을 두지 않는다. Actions는 내장 GITHUB_TOKEN만 쓰고
+# 새 시크릿을 만들지 않는다.
+#
+# workflow_dispatch를 둔 이유: 병합 전에 실제 배포 경로(pull → 기동 → 스모크)를
+# 확인하려면 그 커밋의 이미지가 레지스트리에 있어야 한다. 태그는 언제나 커밋 SHA라
+# 작업 브랜치에서 게재해도 main의 이미지를 덮어쓰지 않는다.
+
+name: Release API image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-api-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish-api-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      # 태그는 커밋 SHA 하나뿐이다. latest도, 브랜치 이름 태그도 만들지 않는다.
+      # 서버가 어떤 커밋을 돌리는지 태그만 보고 알 수 있어야 한다.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: api
+          file: api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/${{ github.repository_owner }}/geoleobom-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record the published reference
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/geoleobom-api"
+          DIGEST="${{ steps.build.outputs.digest }}"
+          {
+            echo '### Published API image'
+            echo ''
+            echo '```'
+            echo "$IMAGE:${{ github.sha }}@$DIGEST"
+            echo '```'
+            echo ''
+            echo 'Deploy pins tag AND digest. No floating tag is published.'
+            echo 'Publishing an image is not a deployment: deploy/deploy_api.sh does that.'
+          } >> "$GITHUB_STEP_SUMMARY"
