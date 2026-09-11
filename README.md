@@ -1,9 +1,10 @@
 # 걸어봄 (geoleobom)
 
 위치 하나를 넣으면 생활시설까지 **실제 보행망 기준** 예상 도보시간을 보여주고, 후보를 4곳까지 담아 비교·공유하는 웹앱.
-제품 범위와 기술 스택은 `docs/걸어봄_확정설계_v2.2.md`가 기준이다.
+제품 범위와 기술 스택은 `docs/걸어봄_확정설계_v2.3.md`가 기준이다.
 
-- 확정 설계: `docs/걸어봄_확정설계_v2.2.md` (동결. 단일 기준)
+- 확정 설계: `docs/걸어봄_확정설계_v2.3.md` (동결. **현재 단일 기준**)
+- 확정 설계 v2.2: `docs/걸어봄_확정설계_v2.2.md` (동결 이력. v2.2→v2.3 차이는 v2.3 부록 E)
 - 확정 설계 v2.1: `docs/걸어봄_확정설계_v2.1.md` (동결 원본. 이력 문서)
 - 개발 운영 가이드: `docs/걸어봄_개발운영가이드_v1.md` (검증·학습 참고. 현재 작업 규칙은 AGENTS.md)
 - 프로젝트 안내와 승인된 결정: `PROJECT.md`
@@ -15,9 +16,9 @@
 기준 문서, 운영 파일, Week 1 HTTPS 빈 페이지 배포 설정, CI, 그리고 API·프론트 **골격**이 있다. 분석 계산(GeoPackage·OSRM)은 아직 없다.
 
 ```
-api/           FastAPI 골격 — /api/health 동작, 4-4 응답 모델, v2.2 계약 상수(app/contract.py)와 고정 검사
+api/           FastAPI 골격 — /api/health 동작, 4-4 응답 모델, 확정설계 계약 상수(app/contract.py)와 고정 검사
 web/           React 18 + TypeScript + Vite 골격 — /api/health 표시
-docs/          확정설계 v2.1(이력)·v2.2(현재) + 개발운영가이드 v1
+docs/          확정설계 v2.3(현재)·v2.2·v2.1(이력) + 개발운영가이드 v1
 deploy/        Week 1 HTTPS 빈 페이지 배포 파일 (compose.yaml, Caddyfile, site/index.html)
 .github/       CI(repository-baseline·api-checks·web-build)·PR 양식·최초 보호 설정 요청 본문
 PROJECT.md     안내 + 승인된 결정
@@ -61,7 +62,7 @@ cd web && npm run dev                                                           
 ```
 
 동작하는 것: `GET /api/health` → `{"status":"ok","time_model_version":"tm1","data_version":null}`.
-`/api/analyze`·`/api/route`·`/api/search`는 v2.2 4-4 응답 모델만 있고 계산은 미구현이라 **501**을 돌려준다.
+`/api/analyze`·`/api/route`·`/api/search`는 4-4 응답 모델만 있고 계산은 미구현이라 **501**을 돌려준다. 응답 모델은 아직 v2.2 시점 표현이며, v2.3이 확정한 오류 body·`count`·`best`/`top3`·`computed_at` 표현은 다음 구현 카드에서 반영한다.
 
 ## 기본 검사 (2026-09-11 실제 실행해 확인)
 
@@ -73,7 +74,7 @@ cd web && npm run build      # tsc -b + vite build → web/dist
 CI(`.github/workflows/ci.yml`)는 세 작업이다.
 
 - `repository-baseline` — 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값 (main 병합 필수 검사)
-- `api-checks` — ruff + pytest (v2.2 계약 상수 고정 검사 `api/tests/test_contract_v22.py` 포함). 실제 OSRM 검사(`real_osrm` 마커)는 제외
+- `api-checks` — ruff + pytest (계약 상수 고정 검사 `api/tests/test_contract_v22.py` 포함 — 파일명은 작성 시점 버전이며, 이 상수들은 v2.3에서 바뀌지 않았다). 실제 OSRM 검사(`real_osrm` 마커)는 제외
 - `web-build` — `tsc -b` + `vite build`
 
 이것은 제품 계산·실제 OSRM·운영 배포 검증이 아니다. `api-checks`·`web-build`를 병합 필수 검사로 올리는 것은 보호 규칙 변경(별도 확인)이다.
@@ -82,7 +83,7 @@ CI(`.github/workflows/ci.yml`)는 세 작업이다.
 
 ## 배포 (2026-09-11 실제 실행해 확인)
 
-절차의 기준은 v2.2 5절, 현재 실행 권한은 `AGENTS.md` 5절이다. 아래는 **실제로 실행해 확인한 범위만** 적는다.
+절차의 기준은 확정설계 5절, 현재 실행 권한은 `AGENTS.md` 5절이다. 아래는 **실제로 실행해 확인한 범위만** 적는다.
 
 확인된 것:
 
@@ -177,7 +178,7 @@ git ls-remote --heads origin
 
 ## 데이터 배포본 복구
 
-**미확인.** v2.2 5절의 데이터 교체·롤백 절차와 개발 운영 가이드 7절이 기준이다. Week 8에 복구 실습을 수행한다.
+**미확인.** 확정설계 5절의 데이터 교체·롤백 절차와 개발 운영 가이드 7절이 기준이다. Week 8에 복구 실습을 수행한다.
 
 ---
 
