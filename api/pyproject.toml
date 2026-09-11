@@ -1,11 +1,12 @@
 [project]
 name = "geoleobom-api"
 version = "0.0.1"
-description = "걸어봄 API (FastAPI). 계약 기준: docs/걸어봄_확정설계_v2.2.md 4-4"
+description = "걸어봄 API (FastAPI). 계약 기준: docs/걸어봄_확정설계_v2.3.md 4-4"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi==0.141.1",
     "uvicorn[standard]==0.52.4",
+    "cachetools==6.2.0",
 ]
 
 [project.optional-dependencies]

@@ -16,7 +16,8 @@
 기준 문서, 운영 파일, Week 1 HTTPS 빈 페이지 배포 설정, CI, 그리고 API·프론트 **골격**이 있다. 분석 계산(GeoPackage·OSRM)은 아직 없다.
 
 ```
-api/           FastAPI 골격 — /api/health 동작, 4-4 응답 모델, 확정설계 계약 상수(app/contract.py)와 고정 검사
+api/           FastAPI — /api/health 동작, 4-4 응답 모델, 계약 상수(app/contract.py),
+               분석 계산 core(app/analysis/, I/O 없음)
 web/           React 18 + TypeScript + Vite 골격 — /api/health 표시
 docs/          확정설계 v2.3(현재)·v2.2·v2.1(이력) + 개발운영가이드 v1
 deploy/        Week 1 HTTPS 빈 페이지 배포 파일 (compose.yaml, Caddyfile, site/index.html)
@@ -62,7 +63,7 @@ cd web && npm run dev                                                           
 ```
 
 동작하는 것: `GET /api/health` → `{"status":"ok","time_model_version":"tm1","data_version":null}`.
-`/api/analyze`·`/api/route`·`/api/search`는 4-4 응답 모델만 있고 계산은 미구현이라 **501**을 돌려준다. 응답 모델은 아직 v2.2 시점 표현이며, v2.3이 확정한 오류 body·`count`·`best`/`top3`·`computed_at` 표현은 다음 구현 카드에서 반영한다.
+`/api/analyze`·`/api/route`·`/api/search`는 **501**을 돌려준다. 응답 모델은 v2.3 4-4 표현을 갖췄고 분석 계산 core도 `api/app/analysis/`에 있지만, 실제 GeoPackage 조회와 OSRM adapter가 없어 endpoint에 연결하지 않았다. 가짜 데이터로 동작하는 것처럼 보이게 하지 않기 위해서다.
 
 ## 기본 검사 (2026-09-11 실제 실행해 확인)
 
@@ -73,11 +74,11 @@ cd web && npm run build      # tsc -b + vite build → web/dist
 
 CI(`.github/workflows/ci.yml`)는 세 작업이다.
 
-- `repository-baseline` — 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값 (main 병합 필수 검사)
-- `api-checks` — ruff + pytest (계약 상수 고정 검사 `api/tests/test_contract_v22.py` 포함 — 파일명은 작성 시점 버전이며, 이 상수들은 v2.3에서 바뀌지 않았다). 실제 OSRM 검사(`real_osrm` 마커)는 제외
+- `repository-baseline` — 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값
+- `api-checks` — ruff + pytest. 계약 검사 두 벌: `test_contract_v22.py`(v2.3에서 값이 바뀌지 않은 상수)와 `test_contract_v23.py`(v2.3이 새로 정한 필수·nullable·UTC 표현). 계산 검사는 합성 후보와 모의 OSRM을 쓴다. 실제 OSRM 검사(`real_osrm` 마커)는 제외
 - `web-build` — `tsc -b` + `vite build`
 
-이것은 제품 계산·실제 OSRM·운영 배포 검증이 아니다. `api-checks`·`web-build`를 병합 필수 검사로 올리는 것은 보호 규칙 변경(별도 확인)이다.
+**세 작업 모두 `main` 병합 필수 검사다**(2026-09-11 보호 규칙, `strict=true`). 다만 이 검사들은 합성·모의 데이터만 쓰므로 실제 OSRM·실데이터·성능·운영 배포를 검증하지 않는다.
 
 자동 병합 초기 설정과 미완료 조건은 [최초 검증 안내](docs/automation-bootstrap.md)에 있다. CI 성공과 GitHub 보호 설정·독립 검토 완료를 구분한다.
 
