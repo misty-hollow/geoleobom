@@ -12,12 +12,14 @@
 
 ## 현재 저장소 상태
 
-기준 문서, 운영 파일, Week 1 HTTPS 빈 페이지 배포 설정과 최소 CI가 있다. **제품 기능 코드는 아직 없다.**
+기준 문서, 운영 파일, Week 1 HTTPS 빈 페이지 배포 설정, CI, 그리고 API·프론트 **골격**이 있다. 분석 계산(GeoPackage·OSRM)은 아직 없다.
 
 ```
+api/           FastAPI 골격 — /api/health 동작, 4-4 응답 모델, v2.2 계약 상수(app/contract.py)와 고정 검사
+web/           React 18 + TypeScript + Vite 골격 — /api/health 표시
 docs/          확정설계 v2.1(이력)·v2.2(현재) + 개발운영가이드 v1
 deploy/        Week 1 HTTPS 빈 페이지 배포 파일 (compose.yaml, Caddyfile, site/index.html)
-.github/       최소 CI·PR 양식·최초 보호 설정 요청 본문
+.github/       CI(repository-baseline·api-checks·web-build)·PR 양식·최초 보호 설정 요청 본문
 PROJECT.md     안내 + 승인된 결정
 AGENTS.md      AI 공통 작업 규칙
 CLAUDE.md      AGENTS.md 연결
@@ -27,7 +29,7 @@ STATUS.md      현재 상태와 다음 작업
 .gitignore     제외 규칙
 ```
 
-제품 코드 디렉터리는 해당 구현을 시작할 때 만든다 (`PROJECT.md` 5절).
+`data/`는 데이터 생성 카드에서 만든다 (`PROJECT.md` 5절).
 
 ## 확인된 개발 도구 (2026-09-10, 읽기 전용 확인)
 
@@ -36,25 +38,45 @@ STATUS.md      현재 상태와 다음 작업
 | Git | 2.53.0 | `C:\Program Files\Git\cmd\git.exe` |
 | Node | 24.14.1 | `C:\Program Files\nodejs\node.exe` |
 | npm | 11.11.0 | `C:\Program Files\nodejs\npm.ps1` |
-| Python | 3.14.4 | `C:\Users\sdsdo\AppData\Local\Python\pythoncore-3.14-64\python.exe` |
-| pip | 26.0.1 | `C:\Users\sdsdo\AppData\Local\Python\bin\pip.exe` |
-| Docker | 미설치 | — |
+| Python (기존) | 3.14.4 | `C:\Users\sdsdo\AppData\Local\Python\pythoncore-3.14-64\python.exe` — 삭제하지 않음 |
+| **Python (프로젝트)** | **3.12.10** | `C:\Users\sdsdo\AppData\Local\Python\pythoncore-3.12-64\python.exe` — 2026-09-11 `py install 3.12`로 설치 |
+| Docker | 미설치 | — (관리자 권한·재부팅 필요. 데이터·OSRM 카드 전에 설치) |
 | WSL | 미설치 | — |
 
-프로젝트용 Python은 3.12로 고정할 예정이다 (`PROJECT.md` 3절). **아직 설치하지 않았다.**
+## 설치 (2026-09-11 실제 실행해 확인)
 
-## 설치
+저장소 루트에서. Windows Git Bash 기준이며 PowerShell에서는 `api/.venv/Scripts/python.exe`를 `api\.venv\Scripts\python.exe`로 읽는다.
 
-**미확인.** 아직 실행해 확인한 설치 절차가 없다.
-확정된 계획은 `PROJECT.md` 3절에 있다 (Python 3.12 추가, Docker Desktop 설치).
+```
+py -3.12 -m venv api/.venv
+api/.venv/Scripts/python.exe -m pip install -e "api/.[dev]"
+cd web && npm ci
+```
 
-## 실행
+## 실행 (2026-09-11 실제 실행해 확인)
 
-**미확인.** 제품 코드가 없다.
+```
+api/.venv/Scripts/python.exe -m uvicorn app.main:app --app-dir api --reload   # http://127.0.0.1:8000/api/health
+cd web && npm run dev                                                           # /api 는 8000으로 프록시
+```
 
-## 기본 검사
+동작하는 것: `GET /api/health` → `{"status":"ok","time_model_version":"tm1","data_version":null}`.
+`/api/analyze`·`/api/route`·`/api/search`는 v2.2 4-4 응답 모델만 있고 계산은 미구현이라 **501**을 돌려준다.
 
-`.github/workflows/ci.yml`의 `repository-baseline`은 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값을 검사한다. 실제 실행 결과는 해당 PR의 Checks에 남긴다. 이것은 제품 계산·실제 OSRM·운영 배포 검증이 아니다. 제품 코드가 생길 때 타입·빌드·계산 검사를 함께 추가한다.
+## 기본 검사 (2026-09-11 실제 실행해 확인)
+
+```
+cd api && .venv/Scripts/python.exe -m ruff check . && .venv/Scripts/python.exe -m ruff format --check . && .venv/Scripts/python.exe -m pytest -q
+cd web && npm run build      # tsc -b + vite build → web/dist
+```
+
+CI(`.github/workflows/ci.yml`)는 세 작업이다.
+
+- `repository-baseline` — 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값 (main 병합 필수 검사)
+- `api-checks` — ruff + pytest (v2.2 계약 상수 고정 검사 `api/tests/test_contract_v22.py` 포함). 실제 OSRM 검사(`real_osrm` 마커)는 제외
+- `web-build` — `tsc -b` + `vite build`
+
+이것은 제품 계산·실제 OSRM·운영 배포 검증이 아니다. `api-checks`·`web-build`를 병합 필수 검사로 올리는 것은 보호 규칙 변경(별도 확인)이다.
 
 자동 병합 초기 설정과 미완료 조건은 [최초 검증 안내](docs/automation-bootstrap.md)에 있다. CI 성공과 GitHub 보호 설정·독립 검토 완료를 구분한다.
 
