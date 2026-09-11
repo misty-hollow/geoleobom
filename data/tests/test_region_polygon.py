@@ -166,7 +166,12 @@ def test_polygon_has_no_horizontal_edges_that_break_ray_casting(shapely_polygon)
     assert horizontal == 0, f"수평 변 {horizontal}개"
 
 
-def test_polygon_is_valid_and_single_piece(shapely_polygon):
+def test_polygon_is_valid_and_a_single_piece(shapely_polygon):
+    """단일 Polygon이어야 한다.
+
+    위의 `exterior`를 쓰는 검사들이 MultiPolygon에서는 깨진다. 여기서 모양을
+    고정해 두면 폴리곤이 여러 조각으로 나뉘는 변경이 조용히 통과하지 않는다.
+    """
     assert shapely_polygon.is_valid
-    assert shapely_polygon.geom_type in ("Polygon", "MultiPolygon")
-    assert not list(getattr(shapely_polygon, "interiors", [])), "구멍이 있다"
+    assert shapely_polygon.geom_type == "Polygon", shapely_polygon.geom_type
+    assert not list(shapely_polygon.interiors), "구멍이 있다"

@@ -40,17 +40,17 @@ cd data
 # 2) 정제 CSV (충청권 필터 + 매핑 + 중복·결측 + 안정적인 fid)
 .venv/Scripts/python.exe -m data.ingest --raw-dir raw \
     --region ../api/app/region_data/chungcheong.geojson \
-    --out build/2026Q3-cc-01/poi.csv --report build/2026Q3-cc-01/ingest_report.json
+    --out build/<버전>/poi.csv --report build/<버전>/ingest_report.json
 
 # 3) GeoPackage
 .venv/Scripts/python.exe -m data.build_gpkg \
-    --csv build/2026Q3-cc-01/poi.csv --out build/2026Q3-cc-01/poi.gpkg
-.venv/Scripts/python.exe -m data.validate_gpkg build/2026Q3-cc-01/poi.gpkg
+    --csv build/<버전>/poi.csv --out build/<버전>/poi.gpkg
+.venv/Scripts/python.exe -m data.validate_gpkg build/<버전>/poi.gpkg
 
 # 4) 게이트 2의 실데이터 품질 항목
 .venv/Scripts/python.exe -m data.gate2_quality \
-    --gpkg build/2026Q3-cc-01/poi.gpkg --coords ../deploy/smoke_coords.json \
-    --out build/2026Q3-cc-01/gate2_quality.json
+    --gpkg build/<버전>/poi.gpkg --coords ../deploy/smoke_coords.json \
+    --out build/<버전>/gate2_quality.json
 ```
 
 `validate_gpkg`는 R*Tree 존재와 `rtree.id = poi.fid` 연결, 좌표 범위, 카테고리 분포,

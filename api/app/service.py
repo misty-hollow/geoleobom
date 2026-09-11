@@ -61,8 +61,10 @@ class AnalysisService:
             raise RuntimeError("분석에 필요한 데이터나 OSRM 설정이 없다")
         poi_path = settings.poi_path
         assert poi_path is not None  # analysis_ready가 보장한다
-        # 폴리곤을 여기서 한 번 읽는다. 지연 로드로 두면 파일이 빠졌을 때
-        # **첫 요청이 500으로 죽을 때까지** 아무도 모른다. 기동에서 멈추는 편이 낫다.
+        # 폴리곤을 서비스를 만들 때 한 번 읽는다. 요청마다 지연 로드하는 것보다
+        # 낫지만, **서비스 자체가 첫 요청에서 만들어지므로**(main.get_service)
+        # 파일이 빠졌다면 프로세스 기동이 아니라 첫 `/api/analyze`에서 드러난다.
+        # 배포 직후 스모크가 곧바로 analyze를 치므로 실제로는 그때 잡힌다.
         load_region()
         return cls(
             settings,

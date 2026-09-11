@@ -4,7 +4,8 @@
 
 | 게이트 2 항목 | 여기서 하는 일 |
 |---|---|
-| 대표 5지점에서 후보 제한(20개)을 풀어 누락 정도를 측정·기록 | 측정한다 |
+| 후보 제한(20개)을 풀어 누락 정도 측정 | **`gate2_cap.py`가 답한다.**
+  여기서는 버리는 양만 센다 |
 | 업종코드 → 6항목 매핑 타당성(편의점·마트 각 20건 표본) | **표본을 뽑아 준다.**
   타당한지는 사람이 본다 |
 | 심평원·공원 좌표 결측률 기록 | 기록한다 |
@@ -17,8 +18,8 @@
 
 ```
 data/.venv/Scripts/python.exe -m data.gate2_quality \\
-    --gpkg data/build/2026Q3-cc-01/poi.gpkg \\
-    --coords deploy/smoke_coords.json --out data/build/2026Q3-cc-01/gate2_quality.json
+    --gpkg data/build/<버전>/poi.gpkg \\
+    --coords deploy/smoke_coords.json --out data/build/<버전>/gate2_quality.json
 ```
 """
 
@@ -53,6 +54,9 @@ SAMPLE_SEED = 20260911
 #   앞이 뒤보다 크면 버린 것이 1등이 될 수 없다.
 #
 # v2.3이 우회 표시 기준으로 쓰는 1.5배(4-3 7단계 `detour_flag`)보다 넉넉하게 잡는다.
+#
+# **이 가정은 검증된 것이 아니다.** 그래서 여기 판정은 참고값이고, 결론은
+# `gate2_cap.py`가 OSRM으로 실제 보행시간을 재서 낸다.
 DETOUR_MAX = 2.0
 
 
@@ -85,11 +89,14 @@ def _within(conn: sqlite3.Connection, lon: float, lat: float, category: str, rad
 
 
 def measure_candidate_cap(conn: sqlite3.Connection, coords: list[dict]) -> list[dict]:
-    """후보 제한 20개가 무엇을 놓치는지 (v2.3 10절 게이트 2).
+    """20개로 자르면 반경 3km 안의 후보를 얼마나 버리는가.
 
-    **직선거리 기준으로만 잰다.** 상위 20개 밖에 보행시간이 더 짧은 곳이 있는지는
-    OSRM을 다 돌려 봐야 알 수 있고, 그것은 여기 범위가 아니다. 여기서 답하는 것은
-    "20개로 자르면 반경 3km 안의 후보를 얼마나 버리는가"다.
+    **이것만으로 게이트 2 항목에 답하지 않는다.** 직선거리 통계라 "제한이 최근접
+    1등을 바꾸는가"를 말하려면 `DETOUR_MAX` 같은 가정을 얹어야 하고, 그 가정은
+    검증된 것이 아니다. `best`는 거리가 아니라 `service_seconds`로 뽑힌다.
+
+    게이트 2가 요구한 "제한을 **풀어** 측정"은 `gate2_cap.py`가 OSRM으로 실제
+    보행시간을 재서 답한다. 여기 숫자는 그 결과를 읽을 때 배경으로 쓴다.
     """
     results = []
     for coord in coords:
@@ -180,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         cap = measure_candidate_cap(conn, coords)
         samples = sample_for_review(conn, args.sample_area)
 
-    print("=== 후보 제한(20개)이 버리는 양 — 직선거리 기준")
+    print("=== 후보 제한(20개)이 버리는 양 — 직선거리 기준 (결론은 gate2_cap.py)")
     for spot in cap:
         print(f"\n{spot['label']}  (1km 내 카페·음식점 {spot['food_cafe_in_1km']}곳)")
         for category, info in spot["nearest"].items():

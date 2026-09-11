@@ -23,8 +23,8 @@
 ```
 cd data
 .venv/Scripts/python.exe -m data.gate2_cap \\
-    --gpkg build/2026Q3-cc-01/poi.gpkg --coords ../deploy/smoke_coords.json \\
-    --osrm http://127.0.0.1:5000 --out build/2026Q3-cc-01/gate2_cap.json
+    --gpkg build/<버전>/poi.gpkg --coords ../deploy/smoke_coords.json \\
+    --osrm http://127.0.0.1:5000 --out build/<버전>/gate2_cap.json
 ```
 """
 
