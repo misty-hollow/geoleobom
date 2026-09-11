@@ -87,7 +87,15 @@ mv .env.next .env
 chmod 600 .env
 echo "되돌린 기준일: \$PREV_POI_DATE"
 
-docker compose -f compose.yaml up -d --force-recreate api osrm
+# deploy_data.sh와 같은 가드. 이미지를 한 번도 배포하지 않았으면 api를 올리지
+# 않는다. compose 기본값은 레지스트리에 없는 태그라 pull에서 실패하고, 그러면
+# 데이터는 이미 되돌아갔는데 롤백이 실패한 것처럼 보인다.
+if grep -q '^GEOLEOBOM_API_IMAGE=' .env; then
+	docker compose -f compose.yaml up -d --force-recreate api osrm
+else
+	echo "   GEOLEOBOM_API_IMAGE가 없다 — osrm만 올린다."
+	docker compose -f compose.yaml up -d --force-recreate osrm
+fi
 ls -l "$DATA_ROOT/current" "$DATA_ROOT/previous"
 REMOTE
 	;;
