@@ -11,17 +11,17 @@
 
 ## 현재 작업과 다음 행동
 
-- 운영 자동화 기반 패치 준비: AGENTS 승인·병합 조건 정리, 최소 CI, PR 양식, 초기 보호 설정 안내. 아직 GitHub PR은 없다.
-- GitHub 실제 조회(2026-09-11): 공개 저장소, main protected=false, ruleset 없음. 이 연결의 보호 상세 조회는 관리 권한 부족으로 403.
-- 자동 병합은 아직 활성화·검증하지 않았다. CI·독립 검토·관리 설정·후속 A급 PR 검증까지 완료로 계산하지 않는다.
-- 다음 행동: Claude Code가 패치를 검토·적용해 PR을 만들고 docs/automation-bootstrap.md 순서로 CI·관리 설정·최초 병합 경로를 검증한다.
+- 운영 자동화 기반(PR #5) main 병합 완료 — `7dcf29d`. AGENTS v2, 최소 CI `repository-baseline`, PR 양식, bootstrap 안내가 main에 있다.
+- GitHub 설정 적용·재조회 완료(2026-09-11): main 보호(필수 검사 `repository-baseline`·strict, 관리자 적용, 리뷰 0, 선형 이력, force push·삭제 차단), `allow_auto_merge`·`allow_squash_merge`·`delete_branch_on_merge` = true. PR #5 병합 후 원격 브랜치 자동 삭제 확인.
+- 이 PR(후속 A급): `.claude/settings.json` 허용·금지 규칙 추가, cleanup 브랜치 내용(PROJECT WSL2 행·README 배포 사실) 통합, 자동 병합 경로 실검증. 결과는 병합 후 이 절에 기록.
+- Codex 독립 검토 자동 호출 경로 없음(`codex` CLI 미설치, VS Code 확장만). B·C PR은 사용자가 Codex에서 검토 요청 → 완료 전까지 draft.
 - 다음 완료 단위: API·프론트 골격과 관련 검사 → 배포·복구 자동화.
 - 외부 대기 작업: 카카오 저장·공유 정책 문의와 위치정보법 확인 채널 질의를 정리해 사용자/C가 발송한다. 발송 여부는 아직 미확인.
 
 ## 막힌 점
 
-- Work Mode의 GitHub 변경 파일 업로드(create-tree)도 403으로 거부됐다. PR·GitHub CI 실행은 못 했다. 관리 설정 변경 도구도 없어 사용자 PC의 Claude Code·gh 환경에서 이어간다.
-- 독립 검토 자동 호출·결과 전달, Python 3.12·Docker Desktop의 사용자 PC 설치는 아직 미확인/미완료다.
+- Claude Code 자동 모드 분류기가 PR #5 흐름에서 `git apply`·`git commit`·`gh pr merge`를 차단해 사용자가 명령 3개를 직접 실행했다. 이 PR의 `.claude/settings.json` 규칙이 그 반복을 없애는지 검증 대상. 규칙은 `gh`가 PATH에 잡힌 뒤(VS Code 재시작) 유효.
+- Python 3.12·Docker Desktop의 사용자 PC 설치는 아직 미완료.
 - 게이트 2 성능·한국 내 응답시간 측정의 지연은 자동 유예나 통과로 취급하지 않는다.
 
 ## 게이트 1 (v2.2 10절)
