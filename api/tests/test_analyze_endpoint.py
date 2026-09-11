@@ -215,9 +215,25 @@ def test_query_validation_stays_a_fastapi_422(client: TestClient):
     assert "code" not in response.json()
 
 
-def test_route_and_search_remain_out_of_scope(client: TestClient):
-    assert client.get("/api/route", params={"lon": 127.1, "lat": 36.4, "fid": 1}).status_code == 501
-    assert client.get("/api/search", params={"q": "공주대"}).status_code == 501
+def test_route_needs_a_fid_from_the_current_analysis(client: TestClient):
+    """`/route`는 이제 구현됐다. 분석에 없는 `fid`는 404다 (v2.4 4-4).
+
+    501 기대값은 그 기능이 범위 밖이던 때의 것이다. **새 오류 코드를 만들지 않고**
+    404로 답하며, 프론트는 그것을 보고 재분석한다. 자세한 검사는 test_route_endpoint.py.
+    """
+    r = client.get("/api/route", params={"lon": 127.1402, "lat": 36.4713, "fid": 999_999})
+    assert r.status_code == 404
+    # 계약 밖 응답이라 제품 오류 body(code·message)가 아니다.
+    assert "code" not in r.json()
+
+
+def test_search_is_unavailable_without_a_rest_key(client: TestClient):
+    """검색 준비 상태는 분석 준비 상태와 **분리돼 있다** (v2.4 4-4).
+
+    이 픽스처에는 카카오 키가 없다. 그래도 위 검사들이 보여주듯 `/api/analyze`는 정상
+    동작하고, `/api/search`만 503이다. 503은 계약 밖 임시 상태다.
+    """
+    assert client.get("/api/search", params={"q": "공주대"}).status_code == 503
 
 
 def test_analyze_is_unavailable_without_data_or_osrm():

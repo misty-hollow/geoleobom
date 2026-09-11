@@ -1,7 +1,7 @@
-"""v2.3 4-4 API 계약의 응답 모델.
+"""현재 확정설계(v2.4) 4-4 API 계약의 응답 모델.
 
 필드명은 원문과 같다. 이름 변경은 문서 개정 사항이다.
-`best`·`top3`·`count`는 **항상 존재하는 필수 필드**이며 기본값을 두지 않는다(v2.3 4-4).
+`best`·`top3`·`count`는 **항상 존재하는 필수 필드**이며 기본값을 두지 않는다(v2.4 4-4).
 계산 로직은 app/analysis에 있고, 이 모듈은 응답 표현과 OpenAPI 스키마만 담당한다.
 """
 
@@ -94,16 +94,34 @@ class LineString(BaseModel):
 
 
 class RouteResponse(BaseModel):
+    """`/api/route` 응답 (v2.4 4-4).
+
+    `versions`는 **필수**이며 `AnalyzeResponse.versions`와 같은 모양이다. 프론트는 화면이
+    들고 있는 분석의 `versions`와 이 값이 다르면 경로를 그리지 않고 재분석한다(4-5).
+    같은 분석에서 값을 가져오므로 정상 경로에서는 항상 같다.
+
+    `snapped_origin`·`snapped_dest`는 분석이 실제로 사용한 스냅 지점이다. 그 지점을
+    가리키는 OSRM 내부 토큰(hint)은 **응답에 싣지 않는다**(v2.4 4-3 10단계).
+    """
+
+    versions: Versions
     geometry: LineString
     walk_seconds: int
     walk_m: int
     snapped_origin: Snapped
     snapped_dest: Snapped
-    # v2.3 4-4·4-3 10단계: slope_ref_seconds는 경사 참고값을 "채택 시에만" 붙는 필드다.
+    # v2.4 4-4·4-3 10단계: slope_ref_seconds는 경사 참고값을 "채택 시에만" 붙는 필드다.
     # Week 10 확인 실측 후 채택 판정이 나면 그때 별도 변경으로 추가한다.
 
 
 class SearchResult(BaseModel):
+    """`/api/search` 결과 한 건 (v2.4 4-4). 카카오 결과의 축약이며 서버에 저장하지 않는다.
+
+    좌표는 카카오가 준 값 그대로다. **여기서 5자리로 깎지 않는다** — v2.4 4-2의 "입력
+    시점에 한 번만" 반올림은 사용자가 결과를 고르는 순간이고, 그 한 곳은
+    `web/src/coords.ts`다. 서버가 미리 깎으면 반올림하는 곳이 둘이 된다.
+    """
+
     name: str
     address: str
     lon: float

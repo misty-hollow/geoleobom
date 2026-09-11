@@ -87,3 +87,98 @@ def test_real_snap_suspects_are_visible(osrm: OsrmClient):
     results = osrm.table(origin, candidates, coordinates)
     distances = [r.snap_distance_m for r in results.values()]
     assert max(distances) > 0.0
+
+
+def test_real_nearest_returns_a_hint(osrm: OsrmClient):
+    """`/route`가 같은 지점을 못박으려면 hint가 실제로 와야 한다 (v2.4 4-3 10단계)."""
+    snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert snap is not None
+    assert snap.hint, "OSRM /nearest가 hint를 돌려주지 않으면 이 설계가 성립하지 않는다"
+
+
+def test_real_table_returns_destination_snap_points(osrm: OsrmClient):
+    """`/table`의 `destinations[]`에 스냅 좌표와 hint가 실제로 들어 있는가.
+
+    예전 파서는 이 둘을 버렸다. 버리면 `/route`는 원 POI 좌표를 다시 보내는 수밖에 없고,
+    그것은 v2.4가 금지한 "재스냅의 결정성으로 대체하기"다.
+    """
+    coordinates = _ring(8)
+    candidates = [
+        Candidate(fid=i + 1, name=f"p{i}", category="convenience", straight_m=100.0)
+        for i in range(8)
+    ]
+    origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert origin is not None
+
+    results = osrm.table(origin, candidates, coordinates)
+    snaps = [r.destination_snap() for r in results.values()]
+    assert all(snap is not None for snap in snaps)
+    assert all(snap.hint for snap in snaps if snap is not None)
+
+    # 스냅 지점이 요청 좌표와 실제로 다르다 — 그래서 "같은 스냅 지점" 요구가 의미를 가진다.
+    moved = [
+        snap
+        for snap, (lon, lat) in zip(snaps, coordinates, strict=True)
+        if snap is not None and (abs(snap.lon - lon) > 1e-6 or abs(snap.lat - lat) > 1e-6)
+    ]
+    assert moved, "모든 목적지가 요청 좌표 그대로라면 이 그래프로는 요구를 검증할 수 없다"
+
+
+def test_real_route_uses_exactly_the_snap_points_table_chose(osrm: OsrmClient):
+    """**실제 OSRM에서 `/table`의 스냅과 `/route`의 스냅이 같음을 증명한다** (v2.4 4-3 10단계).
+
+    모의 OSRM 검사(tests/test_route_endpoint.py)는 우리 코드가 무엇을 보내는지 고정하고,
+    이 검사는 실제 그래프가 그 요청에 어떻게 답하는지 확인한다. 둘은 다른 것이다
+    (AGENTS.md 4절).
+    """
+    from app.service import same_snap_point
+
+    coordinates = _ring(6)
+    candidates = [
+        Candidate(fid=i + 1, name=f"p{i}", category="convenience", straight_m=100.0)
+        for i in range(6)
+    ]
+    origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert origin is not None
+
+    results = osrm.table(origin, candidates, coordinates)
+    checked = 0
+    for result in results.values():
+        if result.duration_seconds is None:
+            continue  # 도달 불가 목적지는 경로를 그리지 않는다
+        dest = result.destination_snap()
+        assert dest is not None
+
+        leg = osrm.route(origin, dest)
+
+        assert same_snap_point(leg.origin, origin), "출발지 스냅이 /table 때와 다르다"
+        assert same_snap_point(leg.dest, dest), "목적지 스냅이 /table 때와 다르다"
+        assert leg.coordinates[0] == (leg.origin.lon, leg.origin.lat)
+        assert leg.coordinates[-1] == (leg.dest.lon, leg.dest.lat)
+        checked += 1
+
+    assert checked >= 3, "도달 가능한 목적지가 너무 적어 증명이 약하다"
+
+
+def test_real_route_without_hints_lands_on_the_same_point(osrm: OsrmClient):
+    """hint가 거절돼 좌표만으로 다시 부를 때도 같은 지점에 붙는지 본다.
+
+    이것은 **대체 근거가 아니라 되돌아갈 곳**이다. 같은 지점인지는 어느 경우에도
+    호출자가 확인한다(app/service.py의 `_require_same_snap`).
+    """
+    from app.analysis.models import Snap
+    from app.service import same_snap_point
+
+    origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert origin is not None
+    candidates = [Candidate(fid=1, name="p", category="convenience", straight_m=100.0)]
+    coordinates = _ring(1)
+    dest = osrm.table(origin, candidates, coordinates)[1].destination_snap()
+    assert dest is not None
+
+    stripped_origin = Snap(lon=origin.lon, lat=origin.lat, snap_distance_m=origin.snap_distance_m)
+    stripped_dest = Snap(lon=dest.lon, lat=dest.lat, snap_distance_m=dest.snap_distance_m)
+    leg = osrm.route(stripped_origin, stripped_dest)
+
+    assert same_snap_point(leg.origin, origin)
+    assert same_snap_point(leg.dest, dest)

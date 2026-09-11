@@ -1,7 +1,11 @@
-"""분석 한 번의 흐름 (v2.3 4-3 1~9단계). I/O 없음.
+"""분석 한 번의 흐름 (v2.4 4-3 1~9단계). I/O 없음.
 
 후보 조회(GeoPackage·R*Tree)와 OSRM 통신은 주입된 callable 뒤에 있다. 이 모듈은
-정규화·캐시·오류 경계·상태 판정만 담당한다. 경로 상세(10단계)는 이 카드 범위 밖이다.
+정규화·캐시·오류 경계·상태 판정만 담당한다.
+
+경로 상세(10단계)의 **OSRM 호출은 여기 없다.** 다만 그 단계가 요구하는 "`/table`과
+같은 스냅 지점"을 지키려면 분석이 실제로 쓴 스냅 지점을 이 흐름에서 붙잡아 두어야
+하므로, 결과에 `RouteContext`를 함께 담는다(v2.4 4-3 10단계). 응답에는 나가지 않는다.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -12,7 +16,15 @@ from app.analysis.candidates import build_first_destinations
 from app.analysis.coords import cache_key
 from app.analysis.density import aggregate_density
 from app.analysis.errors import OsrmUnavailable, ProductError, UpstreamError, UpstreamTimeout
-from app.analysis.models import AnalyzeResult, Candidate, RegionInfo, Snap, TableResult
+from app.analysis.models import (
+    AnalyzeResult,
+    Candidate,
+    NearestResult,
+    RegionInfo,
+    RouteContext,
+    Snap,
+    TableResult,
+)
 from app.analysis.nearest import select_nearest
 from app.contract import NEAREST_CATEGORIES, SNAP_WARNING_M
 
@@ -26,8 +38,11 @@ class ResultCache(Protocol):
     def set(self, key: str, value: AnalyzeResult) -> None: ...
 
 
-def _required[T](call: Callable[[], T]) -> T:
-    """필수 결과를 만드는 상류 호출. 실패하면 제품 오류로 승격한다 (v2.3 4-4)."""
+def required_upstream[T](call: Callable[[], T]) -> T:
+    """필수 결과를 만드는 상류 호출. 실패하면 제품 오류로 승격한다 (v2.4 4-4).
+
+    `/route`의 OSRM 호출도 그 요청의 필수 결과이므로 같은 규칙을 쓴다(app/service.py).
+    """
     try:
         return call()
     except UpstreamTimeout as exc:
@@ -36,6 +51,35 @@ def _required[T](call: Callable[[], T]) -> T:
         raise ProductError("OSRM_ERROR", "경로 계산에 실패했습니다") from exc
     except UpstreamError as exc:  # 분류되지 않은 상류 실패도 OSRM 오류로 다룬다
         raise ProductError("OSRM_ERROR", "경로 계산에 실패했습니다") from exc
+
+
+def _route_context(
+    origin: Snap,
+    nearest: Sequence[NearestResult],
+    results: Mapping[int, TableResult],
+) -> RouteContext:
+    """`/route`가 쓸 스냅 지점을 붙잡아 둔다 (v2.4 4-3 10단계).
+
+    **응답에 실린 최근접 시설의 `fid`만** 담는다(`best`와 `top3`). 밀도형 후보는 개수만
+    세고 경로를 그리지 않으므로 담지 않는다 — 최대 5항목 × 3개라 캐시 항목이 커지지 않는다.
+
+    `/table` 응답에 목적지 스냅 좌표가 없으면 그 `fid`는 담지 않는다. 그 경우 `/route`는
+    404로 답하고 프론트가 재분석한다 — **원래 POI 좌표로 다시 스냅해 메우지 않는다.**
+    그것이 v2.4가 금지한 "결정성으로 대체하기"다.
+    """
+    destinations: dict[int, Snap] = {}
+    for item in nearest:
+        facilities = list(item.top3)
+        if item.best is not None:
+            facilities.append(item.best)
+        for facility in facilities:
+            if facility.fid in destinations:
+                continue
+            result = results.get(facility.fid)
+            snap = result.destination_snap() if result is not None else None
+            if snap is not None:
+                destinations[facility.fid] = snap
+    return RouteContext(origin=origin, destinations=destinations)
 
 
 def analyze(
@@ -69,7 +113,7 @@ def analyze(
         if hit is not None:
             return hit  # computed_at을 요청 시각으로 바꾸지 않는다
 
-    snapped = _required(lambda: snap_origin(lon, lat))
+    snapped = required_upstream(lambda: snap_origin(lon, lat))
     if snapped is None:
         raise ProductError("SNAP_FAILED", "출발지를 보행망에 연결하지 못했습니다")
 
@@ -85,7 +129,7 @@ def analyze(
         density_candidates=density_candidates,
     )
 
-    first_results = _required(lambda: run_table(destinations))
+    first_results = required_upstream(lambda: run_table(destinations))
 
     nearest = tuple(
         select_nearest(
@@ -117,6 +161,7 @@ def analyze(
         density=density,
         computed_at=now(),
         warnings=warnings,
+        route_context=_route_context(snapped, nearest, first_results),
     )
     if cache is not None:
         cache.set(key, result)
