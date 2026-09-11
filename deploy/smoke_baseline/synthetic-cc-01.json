@@ -1,0 +1,382 @@
+{
+  "gongju-knu-gate": {
+    "label": "공주대 신관캠퍼스 정문",
+    "lon": 127.1402,
+    "lat": 36.4713,
+    "summary": {
+      "versions": {
+        "data_version": "synthetic-cc-01",
+        "time_model_version": "tm1",
+        "poi_date": "synthetic"
+      },
+      "region": {
+        "supported": true,
+        "label": "충청권",
+        "verified_area": false
+      },
+      "warnings": [],
+      "nearest": {
+        "convenience": {
+          "status": "ok",
+          "best_fid": 6,
+          "best_walk_seconds": 860,
+          "top3_fids": [
+            6,
+            2,
+            16
+          ]
+        },
+        "grocery": {
+          "status": "ok",
+          "best_fid": 32,
+          "best_walk_seconds": 579,
+          "top3_fids": [
+            32,
+            36,
+            24
+          ]
+        },
+        "pharmacy": {
+          "status": "ok",
+          "best_fid": 42,
+          "best_walk_seconds": 717,
+          "top3_fids": [
+            42,
+            46,
+            50
+          ]
+        },
+        "medical": {
+          "status": "ok",
+          "best_fid": 65,
+          "best_walk_seconds": 776,
+          "top3_fids": [
+            65,
+            254,
+            74
+          ]
+        },
+        "park": {
+          "status": "ok",
+          "best_fid": 93,
+          "best_walk_seconds": 737,
+          "top3_fids": [
+            93,
+            82,
+            277
+          ]
+        }
+      },
+      "density": {
+        "status": "capped",
+        "count": 20,
+        "candidates_checked": 20,
+        "candidates_total": 84
+      }
+    }
+  },
+  "gongju-sanseong-market": {
+    "label": "공주 산성시장",
+    "lon": 127.1189,
+    "lat": 36.4468,
+    "summary": {
+      "versions": {
+        "data_version": "synthetic-cc-01",
+        "time_model_version": "tm1",
+        "poi_date": "synthetic"
+      },
+      "region": {
+        "supported": true,
+        "label": "충청권",
+        "verified_area": false
+      },
+      "warnings": [],
+      "nearest": {
+        "convenience": {
+          "status": "ok",
+          "best_fid": 8,
+          "best_walk_seconds": 745,
+          "top3_fids": [
+            8,
+            185,
+            202
+          ]
+        },
+        "grocery": {
+          "status": "ok",
+          "best_fid": 215,
+          "best_walk_seconds": 478,
+          "top3_fids": [
+            215,
+            34,
+            209
+          ]
+        },
+        "pharmacy": {
+          "status": "ok",
+          "best_fid": 228,
+          "best_walk_seconds": 598,
+          "top3_fids": [
+            228,
+            225,
+            229
+          ]
+        },
+        "medical": {
+          "status": "ok",
+          "best_fid": 263,
+          "best_walk_seconds": 302,
+          "top3_fids": [
+            263,
+            251,
+            75
+          ]
+        },
+        "park": {
+          "status": "ok",
+          "best_fid": 279,
+          "best_walk_seconds": 521,
+          "top3_fids": [
+            279,
+            281,
+            94
+          ]
+        }
+      },
+      "density": {
+        "status": "complete",
+        "count": 11,
+        "candidates_checked": 84,
+        "candidates_total": 84
+      }
+    }
+  },
+  "sejong-government-complex": {
+    "label": "정부세종청사",
+    "lon": 127.2589,
+    "lat": 36.504,
+    "summary": {
+      "versions": {
+        "data_version": "synthetic-cc-01",
+        "time_model_version": "tm1",
+        "poi_date": "synthetic"
+      },
+      "region": {
+        "supported": true,
+        "label": "충청권",
+        "verified_area": false
+      },
+      "warnings": [],
+      "nearest": {
+        "convenience": {
+          "status": "ok",
+          "best_fid": 372,
+          "best_walk_seconds": 455,
+          "top3_fids": [
+            372,
+            381,
+            386
+          ]
+        },
+        "grocery": {
+          "status": "ok",
+          "best_fid": 408,
+          "best_walk_seconds": 789,
+          "top3_fids": [
+            408,
+            395,
+            391
+          ]
+        },
+        "pharmacy": {
+          "status": "ok",
+          "best_fid": 415,
+          "best_walk_seconds": 494,
+          "top3_fids": [
+            415,
+            411,
+            416
+          ]
+        },
+        "medical": {
+          "status": "ok",
+          "best_fid": 446,
+          "best_walk_seconds": 1002,
+          "top3_fids": [
+            446,
+            447,
+            445
+          ]
+        },
+        "park": {
+          "status": "ok",
+          "best_fid": 455,
+          "best_walk_seconds": 691,
+          "top3_fids": [
+            455,
+            458,
+            451
+          ]
+        }
+      },
+      "density": {
+        "status": "capped",
+        "count": 20,
+        "candidates_checked": 23,
+        "candidates_total": 84
+      }
+    }
+  },
+  "daejeon-cnu-gate": {
+    "label": "충남대 정문",
+    "lon": 127.345,
+    "lat": 36.368,
+    "summary": {
+      "versions": {
+        "data_version": "synthetic-cc-01",
+        "time_model_version": "tm1",
+        "poi_date": "synthetic"
+      },
+      "region": {
+        "supported": true,
+        "label": "충청권",
+        "verified_area": false
+      },
+      "warnings": [],
+      "nearest": {
+        "convenience": {
+          "status": "ok",
+          "best_fid": 559,
+          "best_walk_seconds": 948,
+          "top3_fids": [
+            559,
+            557,
+            565
+          ]
+        },
+        "grocery": {
+          "status": "ok",
+          "best_fid": 578,
+          "best_walk_seconds": 400,
+          "top3_fids": [
+            578,
+            582,
+            590
+          ]
+        },
+        "pharmacy": {
+          "status": "ok",
+          "best_fid": 595,
+          "best_walk_seconds": 519,
+          "top3_fids": [
+            595,
+            609,
+            594
+          ]
+        },
+        "medical": {
+          "status": "ok",
+          "best_fid": 631,
+          "best_walk_seconds": 306,
+          "top3_fids": [
+            631,
+            620,
+            621
+          ]
+        },
+        "park": {
+          "status": "ok",
+          "best_fid": 639,
+          "best_walk_seconds": 607,
+          "top3_fids": [
+            639,
+            640,
+            643
+          ]
+        }
+      },
+      "density": {
+        "status": "complete",
+        "count": 10,
+        "candidates_checked": 84,
+        "candidates_total": 84
+      }
+    }
+  },
+  "cheongju-cbnu-gate": {
+    "label": "충북대 정문",
+    "lon": 127.454,
+    "lat": 36.628,
+    "summary": {
+      "versions": {
+        "data_version": "synthetic-cc-01",
+        "time_model_version": "tm1",
+        "poi_date": "synthetic"
+      },
+      "region": {
+        "supported": true,
+        "label": "충청권",
+        "verified_area": false
+      },
+      "warnings": [],
+      "nearest": {
+        "convenience": {
+          "status": "ok",
+          "best_fid": 738,
+          "best_walk_seconds": 597,
+          "top3_fids": [
+            738,
+            742,
+            743
+          ]
+        },
+        "grocery": {
+          "status": "ok",
+          "best_fid": 764,
+          "best_walk_seconds": 539,
+          "top3_fids": [
+            764,
+            761,
+            758
+          ]
+        },
+        "pharmacy": {
+          "status": "ok",
+          "best_fid": 793,
+          "best_walk_seconds": 715,
+          "top3_fids": [
+            793,
+            780,
+            784
+          ]
+        },
+        "medical": {
+          "status": "ok",
+          "best_fid": 804,
+          "best_walk_seconds": 618,
+          "top3_fids": [
+            804,
+            813,
+            811
+          ]
+        },
+        "park": {
+          "status": "ok",
+          "best_fid": 830,
+          "best_walk_seconds": 455,
+          "top3_fids": [
+            830,
+            826,
+            825
+          ]
+        }
+      },
+      "density": {
+        "status": "capped",
+        "count": 20,
+        "candidates_checked": 20,
+        "candidates_total": 84
+      }
+    }
+  }
+}
