@@ -92,8 +92,12 @@ done
 
 # 버전 이름이 경로가 되므로 모양을 고정한다. `..`이나 `/`가 들어오면 staging·current
 # 조작이 엉뚱한 곳을 가리킨다.
-if [[ ! "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
-	echo "data_version에는 영숫자와 . _ - 만 쓴다: $VERSION" >&2
+#
+# **첫 글자를 영숫자로 강제한다.** `[A-Za-z0-9._-]+` 만으로는 `.`·`..`·`-x`가 통과한다.
+# 뒤쪽 검사(`test -e`, `test -s .../poi.gpkg`)가 결국 막기는 하지만, 이름 검사가
+# 막는다고 적어 놓고 실제로는 안 막는 상태를 두지 않는다.
+if [[ ! "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+	echo "data_version은 영숫자로 시작하고 영숫자와 . _ - 만 쓴다: $VERSION" >&2
 	exit 2
 fi
 for reserved in current previous .staging; do
@@ -215,8 +219,12 @@ test -s "\$DATA_ROOT/\$VERSION/osrm/chungcheong.osrm.fileIndex" || {
 	exit 1
 }
 
-# MANIFEST가 있으면 **올릴 때 기록한 내용과 지금이 같은지** 본다. 없으면 만들어 둔다
-# (MANIFEST를 쓰기 전에 올라간 버전이 서버에 남아 있다).
+# MANIFEST가 있으면 **올릴 때 기록한 내용과 지금이 같은지** 본다.
+#
+# 없으면 **대조를 건너뛴다. 지금 만들지 않는다.** MANIFEST를 쓰기 전에 올라간 버전이
+# 서버에 남아 있는데, 지금 만들면 "올릴 때의 상태"가 아니라 "지금 상태"를 기록하게 된다.
+# 이미 손댄 파일이라도 그 상태가 정답으로 굳어져 **없는 보장을 있는 것처럼 만든다.**
+# 옛 버전에 명세가 필요하면 사람이 근거를 확인하고 따로 만든다.
 if [[ -f "\$DATA_ROOT/\$VERSION/MANIFEST" ]]; then
 	want_sha="\$(grep '^poi_gpkg_sha256=' "\$DATA_ROOT/\$VERSION/MANIFEST" | cut -d= -f2-)"
 	have_sha="\$(sha256sum "\$DATA_ROOT/\$VERSION/poi.gpkg" | cut -d' ' -f1)"
@@ -234,7 +242,7 @@ if [[ -f "\$DATA_ROOT/\$VERSION/MANIFEST" ]]; then
 	fi
 	echo "   MANIFEST 대조 통과"
 else
-	echo "   MANIFEST 없음 — 지금 기록한다 (이전 방식으로 올라간 버전)"
+	echo "   ** MANIFEST 없음 — 묶음 대조를 건너뛴다 (MANIFEST 이전에 올라간 버전) **"
 fi
 
 # 버전 디렉터리의 poi_date와 지정한 값이 어긋나면 멈춘다. 둘이 갈리면 화면에

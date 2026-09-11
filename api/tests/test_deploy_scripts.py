@@ -14,6 +14,7 @@ Astra 감사가 짚은 네 가지를 고정한다. 넷 다 현재 main에서 코
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -72,10 +73,30 @@ def test_data_deploy_uploads_through_staging_then_moves(deploy_data: str):
 
 
 def test_data_deploy_rejects_path_like_version_names(deploy_data: str):
-    """버전 이름이 경로가 되므로 `..`이나 `/`가 들어오면 엉뚱한 곳을 건드린다."""
-    assert '"$VERSION" =~ ^[A-Za-z0-9._-]+$' in deploy_data
+    """버전 이름이 경로가 되므로 `..`이나 `/`가 들어오면 엉뚱한 곳을 건드린다.
+
+    **첫 글자를 영숫자로 강제해야 한다.** `[A-Za-z0-9._-]+`만으로는 `.`·`..`·`-x`가
+    그대로 통과한다(독립 검토 지적). 뒤쪽 검사가 결국 막더라도, 이름 검사가 막는다고
+    적어 놓고 실제로는 안 막는 상태를 두지 않는다.
+    """
+    pattern = '"$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    assert pattern in deploy_data, "버전 이름 정규식이 첫 글자를 제한하지 않는다"
     for reserved in ("current", "previous", ".staging"):
         assert reserved in deploy_data
+
+
+@pytest.mark.parametrize("bad", [".", "..", "-rf", "a/b", "../evil", ""])
+def test_the_version_name_pattern_rejects_these(bad: str):
+    """스크립트에 적힌 바로 그 정규식을 파이썬에서 돌려 본다.
+
+    문자열 존재만 보면 정규식이 무엇을 통과시키는지 알 수 없다.
+    """
+    assert not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", bad), bad
+
+
+@pytest.mark.parametrize("good", ["2026Q3-cc-03", "synthetic-cc-01", "local-dev", "v1.2.3"])
+def test_the_version_name_pattern_accepts_real_names(good: str):
+    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", good), good
 
 
 def test_data_deploy_verifies_the_version_bundle(deploy_data: str):
@@ -141,12 +162,51 @@ def test_the_recovery_point_advances_only_after_smoke(deploy_api: str):
 
     예전에는 배포를 시작하면서 직전 `.env`를 `.env.previous`로 복사했다. 깨진 배포를
     두 번 연속 하면 복구 지점이 깨진 쪽을 가리킨다.
+
+    **앵커를 실제 호출로 잡는다.** `"smoke.py"` 첫 등장으로 순서를 재면 `--skip-smoke`
+    분기의 안내 문구가 먼저 걸려, **스모크 호출을 통째로 지워도 통과한다**(독립 검토
+    지적). 호출 줄을 그대로 고정한다.
     """
     assert ".env.last-good" in deploy_api
-    smoke_index = deploy_api.index("smoke.py")
-    last_good_index = deploy_api.index("cp .env .env.last-good")
-    assert smoke_index < last_good_index, "스모크보다 먼저 복구 지점을 갱신한다"
-    assert "정상 복구 지점을 갱신하지 않는다" in deploy_api
+    invocation = 'if ! python "$REPO_ROOT/deploy/smoke.py"'
+    assert invocation in deploy_api, "스모크를 실제로 호출하지 않는다"
+    last_good = "cp .env .env.last-good"
+    assert last_good in deploy_api
+    assert deploy_api.index(invocation) < deploy_api.index(last_good), (
+        "스모크보다 먼저 복구 지점을 갱신한다"
+    )
+    # 실패하면 갱신하지 않고 끝나야 한다 — 안내 문구만으로는 부족하다.
+    failure_branch = deploy_api[deploy_api.index(invocation) : deploy_api.index(last_good)]
+    assert "exit 1" in failure_branch, "스모크 실패가 배포를 실패로 끝내지 않는다"
+
+
+def test_the_immutability_guard_actually_exits(deploy_data: str):
+    """안내 문구가 아니라 **종료**를 확인한다.
+
+    `echo "덮어쓰지 않는다"` 뒤의 `exit 1`을 지워도 문구 검사만으로는 통과한다.
+    """
+    guard = deploy_data[deploy_data.index("test -e '$DATA_ROOT/$VERSION'") :]
+    body = guard[: guard.index("STAGING=")]
+    assert "exit 1" in body, "기존 버전을 발견하고도 계속 진행한다"
+
+
+def test_stop_failure_actually_exits(deploy_data: str):
+    """정지 실패 분기가 실제로 멈추는지."""
+    marker = "if ! docker compose -f compose.yaml stop api osrm; then"
+    branch = deploy_data[deploy_data.index(marker) :]
+    branch = branch[: branch.index("fi")]
+    assert "exit 1" in branch, "정지 실패를 알리기만 하고 진행한다"
+
+
+def test_rollback_reapplies_the_whole_restored_compose_file(rollback: str):
+    """복원한 `compose.yaml`이 api에만 적용되면 osrm·caddy 정의는 새것으로 남는다.
+
+    인자 없는 `up -d`는 정의가 바뀐 서비스만 재생성하므로 필요 이상으로 끊지 않는다.
+    """
+    code_branch = rollback[rollback.index("code)") : rollback.index("data)")]
+    assert "docker compose -f compose.yaml up -d\n" in code_branch, (
+        "복원한 compose.yaml을 전체에 적용하지 않는다"
+    )
 
 
 def test_skipping_smoke_does_not_advance_the_recovery_point(deploy_api: str):

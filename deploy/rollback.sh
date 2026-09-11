@@ -116,7 +116,12 @@ mv .env.next .env
 chmod 600 .env
 
 docker pull --quiet "$PREV_IMAGE" >/dev/null
+# **서비스를 지정하지 않는다.** 위에서 그 커밋의 compose.yaml을 통째로 복원했으므로,
+# api만 재생성하면 osrm·caddy의 서비스 정의 변경(이미지 태그·명령·마운트)이 반영되지
+# 않아 "설정은 옛 커밋 것인데 돌고 있는 컨테이너는 새 정의"인 상태가 남는다.
+# 인자 없는 up -d는 **정의가 바뀐 것만** 재생성하므로 필요 이상으로 끊지도 않는다.
 docker compose -f compose.yaml up -d --force-recreate api
+docker compose -f compose.yaml up -d
 
 echo "   API 응답 대기 (최대 ${READY_TIMEOUT_S}s)"
 deadline=\$(( \$(date +%s) + $READY_TIMEOUT_S ))

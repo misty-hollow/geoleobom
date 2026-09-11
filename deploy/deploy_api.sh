@@ -208,7 +208,10 @@ fi
 
 echo
 echo "== 6. 스모크 (픽스처 5좌표) — 통과해야 정상 복구 지점을 갱신한다"
-DATA_VERSION="$(ssh "$HOST" "grep '^GEOLEOBOM_DATA_VERSION=' $REMOTE_DIR/.env | cut -d= -f2-" | tr -d '\r\n')"
+# `|| true`가 필요하다. `.env`에 그 줄이 없으면 grep이 1을 반환하고, `set -e`와
+# `pipefail` 때문에 **배포는 이미 반영된 뒤 스모크 전에** 스크립트가 죽는다.
+# 기준값이 없으면 규약 불변식만 보면 되므로 여기서 멈출 이유가 없다.
+DATA_VERSION="$(ssh "$HOST" "grep '^GEOLEOBOM_DATA_VERSION=' $REMOTE_DIR/.env | cut -d= -f2- || true" | tr -d '\r\n')"
 BASELINE="$REPO_ROOT/deploy/smoke_baseline/$DATA_VERSION.json"
 SMOKE_ARGS=(--base-url "$BASE_URL")
 if [[ -n "$DATA_VERSION" && -f "$BASELINE" ]]; then
