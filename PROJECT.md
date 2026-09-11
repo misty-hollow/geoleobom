@@ -113,7 +113,17 @@ API·계산 의미·저장 데이터·스택·동결된 서버 규약 변경은 
 
 **2026-09-11 C급 승인 — API 표현 공백 4건 확정.** 사용자 승인 문구: "4개 결정 승인, v2.3 진행". 대상은 제품 오류 응답 body와 HTTP 매핑, `density.count`의 상태별 의미, `nearest[].best`·`top3`의 상태별 표현, `computed_at`의 시각 의미다. **상세 규약은 v2.3 4-3·4-4·4-5·부록 B·부록 E를 본다. 이 파일에 복제하지 않는다.** 제품 범위·스택·계산 모델·성능 목표는 바뀌지 않았다.
 
-앱 `/opt/geoleobom`과 설계의 데이터 `/srv/geoleobom/data` 경로는 공존 가능하다. 경로 이동·GHCR 배포 구현·SSH 변경은 이번 초기 CI 작업에 포함하지 않는다.
+앱 `/opt/geoleobom`과 설계의 데이터 `/srv/geoleobom/data` 경로는 공존 가능하다. 경로 이동·GHCR 배포 구현·SSH 변경은 아직 하지 않았다.
+
+**2026-09-11 승인 — 데이터·OSRM 파이프라인 결정 3건.** 사용자 승인 문구: "세 결정 승인".
+
+| 항목 | 결정 | 확인된 사실 |
+|---|---|---|
+| OSRM 이미지 | `ghcr.io/project-osrm/osrm-backend:v5.27.1` 고정. `latest` 금지. PC 전처리와 서버가 같은 이미지 | digest `sha256:855614a38f464b0558a2ad6eaa7cb8c139f39887da9b38b485ce453c6e6e6124`, linux/amd64. Docker Hub `osrm/osrm-backend`는 v5.25.0(2021)에서 멈춰 GHCR을 쓴다. 세 곳(`data/osrm/versions.json`·`deploy/compose.yaml`·`api/app/contract.py`) 일치를 테스트가 검사 |
+| osmium | `data/osrm/Dockerfile.osmium`에서 `debian:bookworm-slim` + Debian `osmium-tool`. 제3자 osmium 이미지 사용 안 함 | base digest `sha256:88200866…`, 빌드 결과 `osmium 1.15.0` / `libosmium 2.19.0` |
+| data 의존성 | `data/`를 `api/`와 완전히 분리. GeoPandas 계열은 PC 전용이며 API 런타임에 넣지 않음 | Windows Python 3.12.10에 geopandas 1.1.4·pyogrio 0.12.1·shapely 2.1.2·pyproj 3.7.2 설치 확인. pyogrio 0.13.0은 cp312 Windows 휠이 없어 0.12.1로 고정 |
+
+**아직 정하지 않은 것 — 지원 지역 폴리곤.** v2.3 4-4의 `region.supported`와 부록 B의 "지원 지역 폴리곤 파일 위치·버전"이 요구하는 파일이 없다. 현재는 데이터 추출 경계 상자로 임시 판정하고 `verified_area`는 항상 False다. 실제 폴리곤이 필요해지는 시점에 한 번 결정한다.
 
 ## 7. 미완료 · 확인 대기
 

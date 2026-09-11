@@ -1,0 +1,19 @@
+{
+  "_comment": "OSRM·osmium 고정 버전. v2.3 4-1 '버전 고정(PC 전처리 이미지 태그 = 서버 이미지 태그)'. deploy/compose.yaml과 api/app/contract.py가 같은 값을 써야 한다.",
+  "osrm": {
+    "image": "ghcr.io/project-osrm/osrm-backend",
+    "tag": "v5.27.1",
+    "digest": "sha256:855614a38f464b0558a2ad6eaa7cb8c139f39887da9b38b485ce453c6e6e6124",
+    "platform": "linux/amd64",
+    "registry_note": "Docker Hub osrm/osrm-backend은 v5.25.0(2021)에서 멈췄다. 공식 최신 배포처는 GHCR이다.",
+    "tag_note": "v5.27.1을 고른 이유: 개발운영가이드 v1이 --max-table-size 제한 검사 동작을 확인할 때 인용한 소스가 이 버전의 table.cpp다.",
+    "pulled_at": "2026-09-11"
+  },
+  "osmium_base": {
+    "image": "debian",
+    "tag": "bookworm-slim",
+    "digest": "sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171",
+    "platform": "linux/amd64",
+    "pulled_at": "2026-09-11"
+  }
+}
