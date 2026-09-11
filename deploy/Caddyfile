@@ -15,12 +15,20 @@
 	# `\?` 대신 `[?]`를 쓴다. Caddyfile이 백슬래시를 그대로 넘겨 `\\?`가 "선택적
 	# 백슬래시"로 해석되면 경로 전체가 지워진다(실제로 겪었다).
 	# 결과: /api/analyze?lon=..&lat=.. -> /api/analyze, /p/36.4,127.1 -> /p
+	#
+	# Referer는 **통째로 삭제한다.** URI만 정제하면 `/p/{좌표}` 페이지에서 `/api/*`를
+	# 부를 때 브라우저가 붙이는 Referer에 좌표가 그대로 남는다(실제로 로그에서 확인했다).
+	# 값을 다듬는 대신 지우는 이유는, 공유 URL에 좌표가 들어가는 구조라 Referer가
+	# 사실상 항상 민감하기 때문이다. Cookie도 같은 이유로 남기지 않는다.
 	log {
 		output stdout
 		format filter {
 			wrap console
 			fields {
 				request>uri regexp "^(/p)/[^?]*|[?].*$" "$1"
+				request>headers>Referer delete
+				request>headers>Referrer delete
+				request>headers>Cookie delete
 				request>remote_ip ip_mask {
 					ipv4 24
 					ipv6 48

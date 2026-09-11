@@ -127,7 +127,10 @@ CI(`.github/workflows/ci.yml`)는 네 작업이다.
 - 공개 주소 **`https://geoleobom.kr`** 에서 빈 페이지가 열린다.
 - `http://`로 접속하면 **308**로 `https://`에 전환된다.
 - 웹 서버는 **Caddy**, 실행 방식은 **Docker Compose**다.
-- `deploy/Caddyfile`의 로그 규칙이 **좌표·검색어를 남기지 않는다**. 로컬에서 Caddy를 띄워 `/api/analyze?lon=..&lat=..`·`/api/search?q=..`·`/p/{좌표}`를 요청하고 접근 로그를 확인했다. 기록되는 것은 경로 템플릿(`/api/analyze`·`/api/search`·`/p`)뿐이다 (v2.3 5절).
+- `deploy/Caddyfile`의 로그 규칙이 **좌표·검색어를 남기지 않는다** (v2.3 5절). 저장소가 쓰는 `caddy:2.11.4-alpine`을 로컬에 띄워 실제 요청을 보내고 접근 로그를 읽어 확인했다.
+  - URI: 쿼리 문자열을 통째로 지우고 `/p/{좌표}`를 `/p`로 줄인다. 남는 것은 경로 템플릿(`/api/analyze`·`/api/search`·`/p`)뿐이다.
+  - **`Referer`·`Referrer`·`Cookie` 헤더는 통째로 삭제한다.** URI만 정제하면 `/p/{좌표}` 페이지가 `/api/*`를 부를 때 Referer에 좌표가 그대로 남는다. 공유 URL에 좌표가 들어가는 구조라 Referer는 사실상 항상 민감하므로 값을 다듬지 않고 지운다.
+  - 확인한 요청: `Referer: https://geoleobom.kr/p/36.47123,127.14020`을 붙인 `/api/analyze?lon=..&lat=..`, `Referer: .../c?p=..`를 붙인 `/api/search?q=..`, 그리고 `/p/{좌표}` 직접 접근. 로그 전체에서 좌표·검색어·`Referer` 문자열이 모두 나오지 않았다.
 
 ```
 deploy/compose.yaml     caddy·osrm·api 서비스 (태그 고정, 외부 공개는 caddy만)

@@ -19,7 +19,9 @@ from app.analysis.models import Candidate
 TABLE = "poi"
 RTREE_TABLE = "rtree_poi_geom"
 EARTH_RADIUS_M = 6_371_008.8  # IUGG 평균 반지름
-METERS_PER_DEG_LAT = 111_320.0
+# bbox를 아주 조금 넓히는 여유. 부동소수 오차로 경계 후보가 빠지지 않게 한다.
+# bbox는 후보를 좁히기만 하고 최종 판정은 haversine이 하므로 넓은 쪽이 안전하다.
+BBOX_MARGIN_M = 1.0
 
 
 def haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -32,11 +34,27 @@ def haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
 
 
 def bbox_for(lon: float, lat: float, radius_m: float) -> tuple[float, float, float, float]:
-    """반경을 감싸는 넉넉한 bbox. R*Tree는 후보를 좁히기만 하고 판정은 haversine이 한다."""
-    dlat = radius_m / METERS_PER_DEG_LAT
+    """반경 원을 **반드시 포함하는** bbox. R*Tree는 후보를 좁히기만 하고 판정은 haversine이 한다.
+
+    `haversine_m`과 **같은 구면 반지름**에서 유도한다. 예전에는 bbox만 별도 상수
+    111,320 m/deg를 썼는데, 그 값이 구면 1도(111,195m)보다 커서 bbox가 반경보다
+    작아졌다(1km에서 약 1.1m, 3km에서 약 3.4m 부족). 그만큼 반경 경계의 후보가
+    R*Tree 조회에서 통째로 빠졌다 — bbox가 작으면 haversine 필터가 만회할 수 없다.
+
+    위도 폭은 `δ = r/R`(라디안), 경도 폭은 구면 캡의 정확식 `asin(sin δ / cos φ)`를 쓴다.
+    `r/(R·cos φ)` 근사는 반경이 커질수록 실제보다 작아져 같은 문제를 만든다.
+    """
+    effective_m = radius_m + BBOX_MARGIN_M
+    delta = effective_m / EARTH_RADIUS_M  # 중심각(라디안)
+    dlat = math.degrees(delta)
+
     cos_lat = math.cos(math.radians(lat))
     # 극 근처에서 0으로 나누지 않도록 하한을 둔다. 서비스 지역에서는 영향 없다.
-    dlon = radius_m / (METERS_PER_DEG_LAT * max(cos_lat, 1e-6))
+    ratio = math.sin(delta) / max(cos_lat, 1e-12)
+    if ratio >= 1.0:
+        # 반경이 극을 감싼다. 경도 전체를 연다.
+        return -180.0, max(lat - dlat, -90.0), 180.0, min(lat + dlat, 90.0)
+    dlon = math.degrees(math.asin(ratio))
     return lon - dlon, lat - dlat, lon + dlon, lat + dlat
 
 
