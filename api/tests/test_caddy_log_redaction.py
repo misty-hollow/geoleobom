@@ -42,6 +42,21 @@ ALLOWED_FORMAT_LINES = frozenset({"wrap console", f"import {SHARED_SNIPPET}"})
 
 URI_FILTER = 'request>uri regexp "^(/p)/[^?]*|[?].*$" "$1"'
 
+# 공유 스니펫 본문에 허용하는 줄. **목록 밖의 줄은 무엇이든 거부한다.**
+# 필드 이름을 따옴표로 감싸거나(`"request>headers>Referer" regexp …`) 다른 스니펫을
+# import 하는 식으로 규칙을 덮어쓰는 경로가 있어, 접두사 검사만으로는 부족하다.
+ALLOWED_SNIPPET_LINES = frozenset(
+    {
+        "fields {",
+        URI_FILTER,
+        *(f"request>headers>{header} delete" for header in SENSITIVE_HEADERS),
+        "request>remote_ip ip_mask {",
+        "ipv4 24",
+        "ipv6 48",
+        "}",
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def caddyfile() -> str:
@@ -88,6 +103,27 @@ def _filter_lines(snippet: str, field_prefix: str) -> list[str]:
     return [line.strip() for line in _code_lines(snippet) if line.strip().startswith(field_prefix)]
 
 
+def _log_blocks(caddyfile: str) -> list[tuple[str, str]]:
+    """`log`로 시작하는 **모든** 블록. 이름이 있든 없든 전부 찾는다.
+
+    `format filter` 블록만 열거하면 **필터가 아예 없는 `log` 블록은 검사에 들어오지
+    않는다.** 사이트에 `log { format console }`을 하나 더 두면 그 로거가 좌표를
+    그대로 기록하는데도 통과한다 — 실제로 Caddy를 띄워 확인했다.
+    """
+    blocks: list[tuple[str, str]] = []
+    offset = 0
+    for line in caddyfile.splitlines(keepends=True):
+        stripped = line.strip()
+        tokens = stripped.split()
+        if tokens and tokens[0] == "log" and stripped.endswith("{"):
+            opener = caddyfile[offset : offset + len(line)].rstrip("\r\n")
+            blocks.append(
+                (stripped, _block_body(caddyfile[offset:], opener[opener.index("log") :]))
+            )
+        offset += len(line)
+    return blocks
+
+
 def test_the_redaction_fields_live_in_one_shared_snippet(caddyfile):
     """필드 목록이 두 벌이면 한쪽만 고치는 사고가 난다."""
     assert f"({SHARED_SNIPPET}) {{" in caddyfile, "공유 스니펫 정의가 없다"
@@ -118,23 +154,41 @@ def test_the_global_logger_does_not_narrow_what_it_receives(caddyfile):
     """
     body = _block_body(_global_options(caddyfile), "log default {")
     for line in _code_lines(body):
-        first = line.strip().split()[0]
+        # 따옴표로 감싸도 같은 지시자다. 렉서가 따옴표를 벗긴다.
+        first = line.strip().split()[0].strip('"')
         assert first not in ("include", "exclude"), f"로거 범위를 좁힌다: {line.strip()}"
 
 
-def test_every_log_block_only_uses_the_shared_filter(caddyfile):
+def test_every_log_block_uses_the_shared_filter(caddyfile):
+    """**모든** `log` 블록이 공유 필터를 쓰는지.
+
+    `format filter` 블록만 세면 **필터가 아예 없는 로거를 하나 더 두는 것**을 놓친다.
+    사이트에 `log { format console }`을 추가하면 그 로거가 좌표와 Referer를 그대로
+    기록하는데, 기존 로거는 멀쩡하므로 다른 검사에 걸리지 않는다. Caddy를 띄워
+    실제로 그렇게 기록되는 것을 확인했다.
+    """
+    blocks = _log_blocks(caddyfile)
+    # 접근 로그와 전역 기본 로거 둘.
+    assert len(blocks) == 2, f"log 블록이 {len(blocks)}개다: {[header for header, _ in blocks]}"
+
+    for header, body in blocks:
+        formats = [line.strip() for line in _code_lines(body) if line.strip().startswith("format")]
+        assert formats == ["format filter {"], f"{header} 의 인코더: {formats}"
+
+
+def test_every_format_filter_block_only_uses_the_shared_snippet(caddyfile):
     """`format filter` 블록에 **허용한 줄만** 있는지.
 
-    `format console`처럼 필터 없는 인코더는 물론이고, `import` 뒤에 필터를 한 줄
-    끼워 넣는 것도 막는다. 같은 필드에 `delete` 뒤 `regexp`를 두면 **delete가
-    덮어써져** 헤더가 그대로 기록된다(Caddy 2.11.4 filterencoder).
+    `import` 뒤에 필터를 한 줄 끼워 넣는 것을 막는다. 같은 필드에 `delete` 뒤
+    `regexp`를 두면 **delete가 덮어써져** 헤더가 그대로 기록된다
+    (Caddy 2.11.4 filterencoder).
     """
     blocks = []
     remaining = caddyfile
     while "format filter {" in remaining:
         blocks.append(_block_body(remaining, "format filter {"))
         remaining = remaining[remaining.index("format filter {") + len("format filter {") :]
-    assert len(blocks) >= 2, f"format filter 블록이 {len(blocks)}개다 (접근 로그와 전역 로거)"
+    assert len(blocks) == 2, f"format filter 블록이 {len(blocks)}개다 (접근 로그와 전역 로거)"
 
     for block in blocks:
         lines = {line.strip() for line in _code_lines(block)}
@@ -180,3 +234,20 @@ def test_the_snippet_has_no_hidden_lines_after_a_dedented_brace(caddyfile):
     snippet = _snippet(caddyfile)
     dedented = [line for line in snippet.splitlines() if line.startswith("}")]
     assert not dedented, f"스니펫 안에 0열 닫는 괄호가 있다: {dedented}"
+
+
+def test_the_snippet_contains_nothing_but_the_expected_filters(caddyfile):
+    """스니펫 본문에 **허용한 줄만** 있는지.
+
+    필드별 접두사 검사만으로는 부족하다. 필드 이름을 따옴표로 감싸거나
+    (`"request>headers>Referer" regexp …`) 다른 스니펫을 `import` 하면 접두사에
+    걸리지 않으면서 `delete`를 덮어쓴다. 둘 다 Caddy에서 확인했다.
+
+    따옴표 안의 중괄호로 깊이 파서를 어긋나게 하는 변이도 여기서 잡힌다. 잘린
+    줄 조각이 허용 목록에 없기 때문이다.
+    """
+    lines = {line.strip() for line in _code_lines(_snippet(caddyfile))}
+    unexpected = lines - ALLOWED_SNIPPET_LINES
+    assert not unexpected, f"스니펫에 예상 밖의 줄: {sorted(unexpected)}"
+    missing = ALLOWED_SNIPPET_LINES - lines
+    assert not missing, f"스니펫에서 빠진 줄: {sorted(missing)}"
