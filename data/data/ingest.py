@@ -1,9 +1,23 @@
 """원본 3종 -> 서비스용 정제 CSV (v2.3 부록 C '생성' 절차의 앞부분).
 
 ```
-원본(data/raw) -> 충청권 필터 -> 매핑표 적용 -> 좌표·결측·중복 처리
+원본(data/raw) -> 수집 폴리곤 필터 -> 매핑표 적용 -> 좌표·결측·중복 처리
               -> 안정적인 fid -> 정제 CSV -> build_gpkg -> validate_gpkg
 ```
+
+## 어느 범위를 수집하나 (v2.3 1-3)
+
+"데이터 추출 범위 = 서비스 경계 + 시설 검색 여유(3km) + 경로 우회 여유"다.
+**지원 판정 폴리곤이 아니라 수집 폴리곤으로 거른다.** 둘은 다른 파일이다.
+
+| 폴리곤 | 파일 | 역할 |
+|---|---|---|
+| 지원 판정 | `api/app/region_data/chungcheong.geojson` | 서버 `region.supported` |
+| POI 수집 | `data/region_data/chungcheong_poi_collection.geojson` | 원본 필터 (지원 + 3km) |
+
+예전에는 지원 폴리곤으로 딱 잘라 넣어서, 경계 근처 좌표의 3km 반경 안에 실재하는
+시설이 배포본에 없었다. `[127.22575, 36.92754]`는 지원 폴리곤 안(경계까지 362m)인데
+3km 안 경기 시설 11곳 중 10곳이 빠져 있었다.
 
 **이 스크립트는 분류 판단을 하지 않는다.** 판단은 `mapping.py`에 적혀 있고 그것도
 사람이 확인해야 하는 기록이다(v2.3 7절). 여기서 하는 일은 원본을 규약된 모양으로
@@ -43,7 +57,7 @@ from data.mapping import (
     park_included,
     validate_mapping_table,
 )
-from data.region import ChungcheongRegion
+from data.region import ChungcheongRegion, CollectionRegion
 from data.schema import ATTRIBUTE_COLUMNS
 
 # 출처 이름. fid 계산에 들어가므로 **바꾸면 모든 fid가 바뀐다.**
@@ -68,6 +82,9 @@ class Stats:
     kept: Counter[str] = field(default_factory=Counter)
     dropped: Counter[str] = field(default_factory=Counter)
     data_dates: set[str] = field(default_factory=set)
+    # 수집 폴리곤 안이지만 지원 폴리곤 **밖**인 행. v2.3 1-3의 3km 여유가 실제로
+    # 무엇을 더 담았는지 보여 준다. 0이면 여유가 동작하지 않는 것이다.
+    margin: Counter[str] = field(default_factory=Counter)
 
     def render(self) -> str:
         lines = ["읽은 행:"]
@@ -77,6 +94,11 @@ class Stats:
         lines.append("제외한 행:")
         if self.dropped:
             lines += [f"  {k:28s} {v:>8,}" for k, v in sorted(self.dropped.items())]
+        else:
+            lines.append("  (없음)")
+        lines.append("그중 지원 경계 밖 3km 여유 구간 (v2.3 1-3):")
+        if self.margin:
+            lines += [f"  {k:28s} {v:>8,}" for k, v in sorted(self.margin.items())]
         else:
             lines.append("  (없음)")
         lines.append(f"원본 기준일: {sorted(self.data_dates)}")
@@ -121,7 +143,22 @@ def _short_address(*parts: str) -> str:
     return joined[:60]
 
 
-def read_commerce(paths: sources.RawPaths, region: ChungcheongRegion, stats: Stats) -> list[dict]:
+@dataclass(frozen=True)
+class Regions:
+    """수집 범위와 지원 범위. 거르는 것은 수집, 지원은 여유 구간을 세는 데만 쓴다."""
+
+    collection: CollectionRegion
+    support: ChungcheongRegion
+
+    def keep(self, lon: float, lat: float) -> bool:
+        return self.collection.contains(lon, lat)
+
+    def in_margin(self, lon: float, lat: float) -> bool:
+        """수집 범위 안이면서 지원 경계 **밖** — v2.3 1-3이 더 담으라고 한 구간이다."""
+        return not self.support.contains(lon, lat)
+
+
+def read_commerce(paths: sources.RawPaths, regions: Regions, stats: Stats) -> list[dict]:
     """상가(상권)정보 -> convenience / grocery / food_cafe."""
     rows: list[dict] = []
     cols = sources.COMMERCE_COLUMNS
@@ -143,9 +180,11 @@ def read_commerce(paths: sources.RawPaths, region: ChungcheongRegion, stats: Sta
                     if lon is None or lat is None:
                         stats.dropped["상가: 좌표 없음"] += 1
                         continue
-                    if not region.contains(lon, lat):
-                        stats.dropped["상가: 지원 폴리곤 밖"] += 1
+                    if not regions.keep(lon, lat):
+                        stats.dropped["상가: 수집 폴리곤 밖"] += 1
                         continue
+                    if regions.in_margin(lon, lat):
+                        stats.margin[f"상가 {category}"] += 1
                     rows.append(
                         {
                             "category": category,
@@ -179,11 +218,14 @@ def _read_hira_sheet(zf: zipfile.ZipFile, member: str) -> tuple[list[str], list[
     return header, body
 
 
-def read_hira(paths: sources.RawPaths, region: ChungcheongRegion, stats: Stats) -> list[dict]:
-    """HIRA 병원·약국 -> medical / pharmacy."""
+def read_hira(paths: sources.RawPaths, regions: Regions, stats: Stats) -> list[dict]:
+    """HIRA 병원·약국 -> medical / pharmacy.
+
+    시도 이름으로 거르지 않는다. 3km 여유는 거리라서 행정 이름으로 표현할 수 없고,
+    표기도 출처마다 달라 틀리기 쉬웠다(`세종` vs `세종시`). 좌표로 판정한다.
+    """
     rows: list[dict] = []
     cols = sources.HIRA_COLUMNS
-    wanted_sido = set(sources.HIRA_SIDO)
     with zipfile.ZipFile(paths.hira_zip) as zf:
         for member, label in (
             (sources.HIRA_HOSPITAL_MEMBER, "medical"),
@@ -196,9 +238,6 @@ def read_hira(paths: sources.RawPaths, region: ChungcheongRegion, stats: Stats) 
                 raise SystemExit(f"HIRA 시트에 컬럼이 없다 ({member}): {missing}")
             for raw in body:
                 stats.read[f"HIRA {label}"] += 1
-                if _clean(raw[index[cols["sido"]]]) not in wanted_sido:
-                    stats.dropped[f"HIRA {label}: 충청권 밖 시도"] += 1
-                    continue
                 kind = _clean(raw[index[cols["kind_name"]]])
                 if label == "pharmacy" and kind not in PHARMACY_KIND_NAMES:
                     stats.dropped["HIRA pharmacy: 약국 아님"] += 1
@@ -210,9 +249,11 @@ def read_hira(paths: sources.RawPaths, region: ChungcheongRegion, stats: Stats) 
                 if lon is None or lat is None:
                     stats.dropped[f"HIRA {label}: 좌표 없음"] += 1
                     continue
-                if not region.contains(lon, lat):
-                    stats.dropped[f"HIRA {label}: 지원 폴리곤 밖"] += 1
+                if not regions.keep(lon, lat):
+                    stats.dropped[f"HIRA {label}: 수집 폴리곤 밖"] += 1
                     continue
+                if regions.in_margin(lon, lat):
+                    stats.margin[f"HIRA {label}"] += 1
                 rows.append(
                     {
                         "category": label,
@@ -234,18 +275,18 @@ def read_hira(paths: sources.RawPaths, region: ChungcheongRegion, stats: Stats) 
     return rows
 
 
-def read_parks(paths: sources.RawPaths, region: ChungcheongRegion, stats: Stats) -> list[dict]:
-    """도시공원 표준데이터 -> park."""
+def read_parks(paths: sources.RawPaths, regions: Regions, stats: Stats) -> list[dict]:
+    """도시공원 표준데이터 -> park.
+
+    주소 접두사로 거르지 않는다. HIRA와 같은 이유다 — 3km 여유는 주소로 표현할 수
+    없고 표기가 시도마다 흔들린다(`충청남도`/`충남`). 좌표로 판정한다.
+    """
     rows: list[dict] = []
     cols = sources.PARK_COLUMNS
     text = paths.park_csv.read_bytes().decode(sources.PARK_ENCODING)
-    prefixes = tuple(p for group in sources.PARK_SIDO_PREFIXES.values() for p in group)
     for raw in csv.DictReader(io.StringIO(text, newline="")):
         stats.read["공원"] += 1
         address = _clean(raw[cols["address_road"]]) or _clean(raw[cols["address_lot"]])
-        if not address.startswith(prefixes):
-            stats.dropped["공원: 충청권 밖 주소"] += 1
-            continue
         kind = _clean(raw[cols["kind"]])
         if not park_included(kind):
             stats.dropped[f"공원: 제외 구분({kind})"] += 1
@@ -255,9 +296,11 @@ def read_parks(paths: sources.RawPaths, region: ChungcheongRegion, stats: Stats)
         if lon is None or lat is None:
             stats.dropped["공원: 좌표 없음"] += 1
             continue
-        if not region.contains(lon, lat):
-            stats.dropped["공원: 지원 폴리곤 밖"] += 1
+        if not regions.keep(lon, lat):
+            stats.dropped["공원: 수집 폴리곤 밖"] += 1
             continue
+        if regions.in_margin(lon, lat):
+            stats.margin["공원"] += 1
         data_date = _clean(raw[cols["data_date"]])
         stats.data_dates.add(data_date)
         rows.append(
@@ -332,7 +375,26 @@ def drop_missing_identity(rows: list[dict], stats: Stats) -> list[dict]:
     return kept
 
 
-def build_rows(raw_dir: Path, region: ChungcheongRegion) -> tuple[list[dict], Stats]:
+def check_sources_cover_the_collection_range(regions: Regions) -> None:
+    """수집 폴리곤에 닿는 시도의 원본을 **전부 읽고 있는지** 확인한다 (v2.3 1-3).
+
+    상가 원본만 시도별 파일로 나뉘어 있어 목록이 필요하다. 그 목록이 폴리곤보다
+    좁으면 여유 구간의 일부가 조용히 비어 버린다 — 오류가 나지 않아 더 위험하다.
+    """
+    touching = regions.collection.touching_sido
+    if not touching:
+        raise SystemExit(
+            "수집 폴리곤에 touching_sido가 없다. make_region_polygon.py로 다시 만들어라"
+        )
+    unknown = sorted(set(touching) - set(sources.COMMERCE_REGION_BY_SIDO))
+    if unknown:
+        raise SystemExit(
+            "수집 폴리곤이 닿는데 상가 원본을 읽지 않는 시도가 있다: "
+            f"{unknown}. data/data/sources.py의 COMMERCE_REGION_BY_SIDO를 채워라"
+        )
+
+
+def build_rows(raw_dir: Path, regions: Regions) -> tuple[list[dict], Stats]:
     stats = Stats()
     paths = sources.RawPaths(raw_dir)
     missing = paths.missing()
@@ -343,10 +405,12 @@ def build_rows(raw_dir: Path, region: ChungcheongRegion) -> tuple[list[dict], St
     if problems:
         raise SystemExit("매핑표가 앞뒤가 맞지 않는다:\n  " + "\n  ".join(problems))
 
+    check_sources_cover_the_collection_range(regions)
+
     rows = [
-        *read_commerce(paths, region, stats),
-        *read_hira(paths, region, stats),
-        *read_parks(paths, region, stats),
+        *read_commerce(paths, regions, stats),
+        *read_hira(paths, regions, stats),
+        *read_parks(paths, regions, stats),
     ]
     rows = drop_missing_identity(rows, stats)
     rows = deduplicate(rows, stats)
@@ -386,13 +450,34 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="원본 3종으로 서비스용 정제 CSV를 만든다")
     parser.add_argument("--raw-dir", type=Path, default=sources.DEFAULT_RAW_DIR)
-    parser.add_argument("--region", type=Path, default=ChungcheongRegion.DEFAULT_PATH)
+    parser.add_argument(
+        "--region",
+        type=Path,
+        default=ChungcheongRegion.DEFAULT_PATH,
+        help="지원 판정 폴리곤. 거르는 데 쓰지 않고 여유 구간을 세는 데만 쓴다",
+    )
+    parser.add_argument(
+        "--collection-region",
+        type=Path,
+        default=CollectionRegion.DEFAULT_PATH,
+        help="POI 수집 폴리곤(지원 + 3km). **원본을 거르는 것은 이쪽이다** (v2.3 1-3)",
+    )
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--report", type=Path, help="처리 요약을 JSON으로도 저장한다")
     args = parser.parse_args(argv)
 
-    region = ChungcheongRegion.load(args.region)
-    rows, stats = build_rows(args.raw_dir, region)
+    regions = Regions(
+        collection=CollectionRegion.load(args.collection_region),
+        support=ChungcheongRegion.load(args.region),
+    )
+    if regions.collection.version != regions.support.version:
+        # 둘은 같은 원본에서 함께 나온다. 버전이 갈리면 수집 범위가 지원 경계를
+        # 덮지 못할 수 있고, 그러면 "지원한다고 답하는데 시설이 없는" 구간이 생긴다.
+        raise SystemExit(
+            f"폴리곤 버전이 다르다: 지원 {regions.support.version} != "
+            f"수집 {regions.collection.version}. make_region_polygon.py로 함께 다시 만들어라"
+        )
+    rows, stats = build_rows(args.raw_dir, regions)
     write_csv(args.out, rows)
 
     poi_date = poi_date_for(stats)
@@ -410,7 +495,14 @@ def main(argv: list[str] | None = None) -> int:
                     "read": dict(stats.read),
                     "kept": dict(stats.kept),
                     "dropped": dict(stats.dropped),
-                    "region_polygon": str(args.region),
+                    # v2.3 1-3의 3km 여유가 실제로 더 담은 행. 0이면 여유가 꺼진 것이다.
+                    "margin_outside_support": dict(stats.margin),
+                    "margin_total": sum(stats.margin.values()),
+                    "support_polygon": str(args.region),
+                    "collection_polygon": str(args.collection_region),
+                    "polygon_version": regions.support.version,
+                    "collection_touching_sido": list(regions.collection.touching_sido),
+                    "commerce_regions_read": list(sources.COMMERCE_REGIONS),
                 },
                 ensure_ascii=False,
                 indent=2,

@@ -33,8 +33,23 @@ CADDYFILE = Path(__file__).resolve().parents[2] / "deploy" / "Caddyfile"
 
 SHARED_SNIPPET = "redacted_fields"
 
-# 좌표가 실릴 수 있어 통째로 지우는 헤더.
-SENSITIVE_HEADERS = ("Referer", "Referrer", "Cookie")
+# **필드를 통째로 지운다.** 예전에는 `Referer`·`Referrer`·`Cookie` 세 헤더만 이름으로
+# 지웠는데, 그러면 나머지가 그대로 남는다. 저장소 설정 그대로 Caddy를 띄워 확인한 줄:
+#
+#   "client_ip": "172.17.0.1"                     <- 마스킹 없는 원 IP
+#   "headers": {"User-Agent":[...], "X-Forwarded-For":["203.0.113.9"], ...}
+#
+# `client_ip`는 접속자의 실제 IP이고(`remote_ip`에만 ip_mask가 걸려 있었다),
+# `X-Forwarded-For`는 클라이언트가 보낸 IP 문자열, `User-Agent`는 지문이 된다.
+# 셋 다 v2.3 5절의 허용 항목이 아니다.
+#
+# 이름을 열거하는 방식은 **새 헤더가 생길 때마다 새는 쪽으로 기울어서** 객체째 지운다.
+DELETED_FIELDS = (
+    "request>headers",  # Referer·Cookie·X-Forwarded-For·User-Agent를 한 번에
+    "request>client_ip",  # 마스킹되지 않는 원 IP
+    "request>remote_port",
+    "resp_headers",
+)
 
 # `format filter` 블록에 허용하는 줄. 여기에 다른 필터를 끼워 넣으면 스니펫의
 # 규칙을 덮어쓸 수 있다(같은 필드에 delete 뒤 regexp를 두면 delete가 덮어써진다).
@@ -49,7 +64,7 @@ ALLOWED_SNIPPET_LINES = frozenset(
     {
         "fields {",
         URI_FILTER,
-        *(f"request>headers>{header} delete" for header in SENSITIVE_HEADERS),
+        *(f"{field} delete" for field in DELETED_FIELDS),
         "request>remote_ip ip_mask {",
         "ipv4 24",
         "ipv6 48",
@@ -227,8 +242,8 @@ def test_the_shared_snippet_strips_the_query_string_and_the_path_parameter(caddy
     assert "\\?" not in snippet
 
 
-@pytest.mark.parametrize("header", SENSITIVE_HEADERS)
-def test_each_sensitive_header_is_deleted_exactly_once(caddyfile, header):
+@pytest.mark.parametrize("field", DELETED_FIELDS)
+def test_each_sensitive_field_is_deleted_exactly_once(caddyfile, field):
     """`delete` 줄이 있는 것만으로는 부족하다.
 
     뒤에 같은 필드의 `regexp` 필터를 한 줄 더 두면 Caddy가 delete를 덮어쓰고,
@@ -236,9 +251,46 @@ def test_each_sensitive_header_is_deleted_exactly_once(caddyfile, header):
     그것이 delete인지** 본다.
     """
     snippet = _snippet(caddyfile)
-    lines = _filter_lines(snippet, f"request>headers>{header}")
-    assert len(lines) == 1, f"{header}에 필터가 {len(lines)}개다: {lines}"
-    assert lines[0] == f"request>headers>{header} delete", lines[0]
+    lines = _filter_lines(snippet, field)
+    assert len(lines) == 1, f"{field}에 필터가 {len(lines)}개다: {lines}"
+    assert lines[0] == f"{field} delete", lines[0]
+
+
+def test_headers_are_deleted_as_a_whole_not_by_name(caddyfile):
+    """헤더 이름을 하나씩 지우는 방식으로 되돌아가지 않는지.
+
+    `request>headers>Referer delete`처럼 이름을 열거하면 열거하지 않은 헤더
+    (`X-Forwarded-For`·`User-Agent`·앞으로 생길 것들)가 그대로 기록된다.
+    운영 로그에서 실제로 그랬다.
+    """
+    snippet = _snippet(caddyfile)
+    per_header = [
+        line
+        for line in _filter_lines(snippet, "request>headers")
+        if line.startswith("request>headers>")
+    ]
+    assert not per_header, f"헤더를 이름으로 지운다: {per_header}"
+
+
+def test_the_client_ip_field_is_not_merely_masked(caddyfile):
+    """`remote_ip`만 마스킹하고 `client_ip`를 놓치는 것이 원래 결함이었다.
+
+    Caddy는 두 필드를 모두 찍는다. `ip_mask`를 `remote_ip`에만 걸면 `client_ip`에
+    원 IP가 그대로 남는다 — 로컬에서 저장소 설정 그대로 띄워 확인했다.
+    """
+    snippet = _snippet(caddyfile)
+    client_lines = _filter_lines(snippet, "request>client_ip")
+    assert client_lines == ["request>client_ip delete"], client_lines
+
+
+def test_remote_ip_is_still_masked(caddyfile):
+    """남기는 IP는 /24·/48로 마스킹된 것 하나뿐이다."""
+    snippet = _snippet(caddyfile)
+    lines = _filter_lines(snippet, "request>remote_ip")
+    assert len(lines) == 1, f"request>remote_ip 필터가 {len(lines)}개다: {lines}"
+    assert lines[0] == "request>remote_ip ip_mask {", lines[0]
+    assert "ipv4 24" in snippet
+    assert "ipv6 48" in snippet
 
 
 def test_the_snippet_has_no_hidden_lines_after_a_dedented_brace(caddyfile):
