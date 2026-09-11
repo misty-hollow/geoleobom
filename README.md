@@ -138,11 +138,41 @@ deploy/Caddyfile        도메인·정적 파일·/api 프록시·로그 규칙
 deploy/site/index.html  공개되는 빈 페이지
 ```
 
+### 이미지 게재와 배포 명령
+
+API 이미지는 **`main` 병합 때 GitHub Actions가 GHCR에 올린다.** 태그는 커밋 SHA 하나뿐이고 `latest`는 만들지 않는다. 저장소가 공개라 패키지도 공개이므로 서버에 레지스트리 토큰을 두지 않는다. 서버에서 이미지를 빌드하지 않는다(v2.3 4-1).
+
+배포는 **코드와 데이터를 분리해서** 한다(AGENTS.md 5절).
+
+```
+bash deploy/deploy_data.sh --version <data_version> --poi-date <기준일> --upload <로컬 버전 디렉터리>
+bash deploy/deploy_api.sh <main의 커밋 SHA 40자>
+python deploy/smoke.py --base-url https://geoleobom.kr --baseline deploy/smoke_baseline/<data_version>.json
+```
+
+- `deploy_data.sh`는 v2.3 5절의 교체 절차를 그대로 따른다. 업로드 → `api`·`osrm` 정지 → `current` 참조 변경 → 컨테이너 재생성 → 직전 버전 보존. **실행 중 파일 덮어쓰기와 단순 `restart`로 끝내지 않는다.** 기준일은 버전 디렉터리의 `poi_date.txt`에 함께 남아 롤백이 데이터와 기준일을 짝지어 되돌린다.
+- `deploy_api.sh`는 태그만 믿지 않는다. 레지스트리에서 **digest를 조회해 태그 + digest로 고정**하고, 기동 뒤 실제로 그 이미지가 돌고 있는지 컨테이너에서 대조한다.
+- 롤백은 `bash deploy/rollback.sh code` 또는 `... data`다. 데이터 롤백은 **아무것도 지우지 않고** `current`/`previous` 링크만 맞바꾼다. 사전 조건(직전 버전의 데이터·기준일 존재, `previous != current`)을 **서비스를 정지하기 전에** 모두 확인하므로, 되돌릴 수 없는 상황이면 아무것도 건드리지 않고 멈춘다.
+- 되돌린 뒤에는 반드시 `deploy/smoke.py`로 실제 응답을 확인한다. 스크립트가 성공했다는 것만으로 복구됐다고 하지 않는다.
+- **첫 배포에서는 데이터가 먼저다.** 아직 이미지가 없으면 `deploy_data.sh`가 `osrm`만 올리고 `api`는 건너뛴다. 이미지가 없는 채로 `api`를 올리려 하면 compose 기본 태그를 pull하다 실패하는데, 그러면 데이터 반영까지 같이 실패한 것처럼 보인다.
+- **`deploy_api.sh`는 caddy 컨테이너도 재생성한다.** compose의 caddy 이미지가 태그에서 태그 + digest로 바뀌었기 때문이다. 공개 페이지가 수 초 끊긴다. 인증서는 `geoleobom_caddy_data` 볼륨에 있어 보존된다.
+
+### 게이트 2 측정 명령
+
+```
+python deploy/loadtest.py --base-url https://geoleobom.kr --mode latency
+python deploy/loadtest.py --base-url https://geoleobom.kr --mode load --concurrency 4 --rounds 6
+ssh geoleobom 'bash -s 180' < deploy/sample_memory.sh > mem.tsv   # 부하와 동시에
+bash deploy/sample_memory.sh --summary mem.tsv
+```
+
+`loadtest.py`는 요청마다 좌표 5번째 자리를 바꿔 **캐시 미스를 보장한다**(캐시 키에 격자 반올림이 없다, v2.3 4-3). 개발 PC가 한국에 있으므로 여기서 재는 값이 **한국 내 클라이언트 체감 시간**이다. 서버 내부 처리 시간은 API 로그의 `duration_ms`로 따로 읽는다. 게이트 2는 둘을 구분해 적으라고 정했다.
+
 아직 확인하지 않은 것:
 
-- **운영 서버에 api·osrm을 올리지 않았다.** 지금 서버에 뜬 컨테이너는 Caddy 하나뿐이고, compose의 새 서비스는 로컬에서만 검증했다.
-- **재현 가능한 자동 배포 명령은 아직 미확인이다.** 서버 반영 명령을 실행해 확인한 기록이 없다. 실제로 실행해 확인한 뒤 명령을 적는다.
-- **데이터 배포본을 서버에 올리는 절차(v2.3 5절)도 아직 실행하지 않았다.**
+- **운영 서버에 api·osrm을 아직 올리지 않았다.** 지금 서버에 뜬 컨테이너는 Caddy 하나뿐이다. 위 배포 명령은 **작성했고 문법·구성 검사는 통과했지만 서버에서 실행해 확인하지 않았다.** AGENTS.md 5절이 배포를 "main의 검사된 커밋"에서 하라고 정했고, GHCR 이미지는 `main` 병합 뒤에야 생기기 때문이다. 실행한 뒤 결과를 이 절에 적는다.
+- **게이트 2의 성능·자원 4항목은 미측정이다** — 캐시 미스 2초, 동시 4요청 부하, `MemAvailable` 1GB, 한국 내 클라이언트 응답시간.
+- **첫 배포본은 합성 데이터다.** `data_version`은 `synthetic-cc-01`, `poi_date`는 `synthetic`이라 응답의 `versions`만 봐도 실데이터가 아님이 드러난다. 실데이터가 오면 같은 교체 절차로 갈아끼운다.
 
 ## Git 저장·복구 (2026-09-10 실제 실행해 확인)
 

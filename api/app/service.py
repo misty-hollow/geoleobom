@@ -19,7 +19,7 @@ from app.adapters.osrm import OsrmClient
 from app.adapters.poi import PoiRepository
 from app.analysis.cache import AnalyzeCache
 from app.analysis.coords import normalize_coord
-from app.analysis.core import analyze
+from app.analysis.core import ResultCache, analyze
 from app.analysis.models import AnalyzeResult, Candidate, RegionInfo, Snap, TableResult
 from app.contract import (
     DENSITY_CATEGORY,
@@ -28,6 +28,7 @@ from app.contract import (
     NEAREST_RADIUS_M,
     NEAREST_TOP_N,
 )
+from app.request_log import RequestMetrics
 from app.settings import Settings
 
 # 데이터 추출 경계 상자(data/osrm/chungcheong.geojson)와 같은 값.
@@ -66,7 +67,9 @@ class AnalysisService:
             osrm=OsrmClient(str(settings.osrm_base_url), timeout_s=settings.osrm_timeout_s),
         )
 
-    def analyze(self, *, lon: float, lat: float) -> AnalyzeResult:
+    def analyze(
+        self, *, lon: float, lat: float, metrics: RequestMetrics | None = None
+    ) -> AnalyzeResult:
         # 5자리 반올림은 여기서 한 번만 한다(v2.3 4-2).
         norm_lon = normalize_coord(lon)
         norm_lat = normalize_coord(lat)
@@ -86,9 +89,18 @@ class AnalysisService:
         def run_table(batch: Sequence[Candidate]) -> Mapping[int, TableResult]:
             if not snap_holder:
                 raise RuntimeError("스냅 전에 /table을 부를 수 없다")
+            # 5절이 허용한 "목적지 수·배치 수"는 여기서만 센다. 좌표는 세지 않는다.
+            if metrics is not None:
+                metrics.record_table(len(batch))
             return self._osrm.table(snap_holder[0], batch, [coordinates[c.fid] for c in batch])
 
         deadline = time.monotonic() + self._settings.analysis_budget_s
+
+        # 캐시 히트/미스도 5절이 허용한 항목이다. core의 캐시 규약(4-3 2단계)을
+        # 흉내 내지 않으려고 키 계산을 다시 하지 않고 실제 조회를 감싸서 센다.
+        cache: ResultCache = (
+            self._cache if metrics is None else _CountingCache(self._cache, metrics)
+        )
 
         return analyze(
             lon=norm_lon,
@@ -96,13 +108,13 @@ class AnalysisService:
             region=region_for(norm_lon, norm_lat),
             data_version=str(self._settings.data_version),
             time_model_version=self._settings.time_model_version,
-            poi_date=self._settings.poi_date or "unknown",
+            poi_date=_required_poi_date(self._settings.poi_date),
             snap_origin=snap_origin,
             nearest_candidates=nearest_candidates,
             density_candidates=density_candidates,
             run_table=run_table,
             now=lambda: datetime.now(UTC),
-            cache=self._cache,
+            cache=cache,
             budget_exceeded=lambda: time.monotonic() > deadline,
         )
 
@@ -137,6 +149,29 @@ class AnalysisService:
         """`/table` 요청에 넣을 좌표를 fid로 기억해 둔다."""
         for fid, plon, plat in self._poi.coordinates_for([c.fid for c in items]):
             coordinates[fid] = (plon, plat)
+
+
+class _CountingCache:
+    """캐시 히트/미스만 세는 얇은 껍데기. 저장·조회 동작은 그대로 위임한다."""
+
+    def __init__(self, inner: ResultCache, metrics: RequestMetrics) -> None:
+        self._inner = inner
+        self._metrics = metrics
+
+    def get(self, key: str) -> AnalyzeResult | None:
+        hit = self._inner.get(key)
+        self._metrics.cache = "hit" if hit is not None else "miss"
+        return hit
+
+    def set(self, key: str, value: AnalyzeResult) -> None:
+        self._inner.set(key, value)
+
+
+def _required_poi_date(poi_date: str | None) -> str:
+    """`analysis_ready`가 이미 보장한다. 자리표시자를 응답에 넣지 않는다."""
+    if not poi_date:
+        raise RuntimeError("poi_date 없이 분석을 켤 수 없다")
+    return poi_date
 
 
 def poi_path_from(data_dir: Path) -> Path:

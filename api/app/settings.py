@@ -32,10 +32,16 @@ class Settings:
 
     @property
     def analysis_ready(self) -> bool:
-        """실제 데이터와 OSRM이 모두 있어야 분석을 켠다. 가짜로 동작시키지 않는다."""
+        """실제 데이터와 OSRM이 모두 있어야 분석을 켠다. 가짜로 동작시키지 않는다.
+
+        `poi_date`도 필수다. v2.3 4-5는 "모든 화면에 `poi_date`를 노출한다"고 정했으므로
+        기준일을 모르는 채로 분석을 켜면 화면이 근거 없는 기준일을 보여주게 된다.
+        `"unknown"` 같은 자리표시자를 응답에 넣는 대신 503으로 거부한다.
+        """
         return bool(
             self.osrm_base_url
             and self.data_version
+            and self.poi_date
             and self.poi_path is not None
             and self.poi_path.exists()
         )
@@ -56,7 +62,10 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     return Settings(
         data_dir=data_dir,
         data_version=data_version,
-        time_model_version=source.get("GEOLEOBOM_TIME_MODEL_VERSION", TIME_MODEL_VERSION),
+        # time_model_version은 환경변수로 받지 않는다. 이 값은 프로필과 k에서 나오며
+        # (v2.3 4-2) k는 contract.py 상수다. env로 버전만 올릴 수 있게 두면 k는 그대로인데
+        # 캐시 키와 응답의 버전만 달라져, 같은 시간 모델의 결과가 다른 버전으로 기록된다.
+        time_model_version=TIME_MODEL_VERSION,
         poi_date=source.get("GEOLEOBOM_POI_DATE") or None,
         osrm_base_url=source.get("GEOLEOBOM_OSRM_URL") or None,
         osrm_timeout_s=float(source.get("GEOLEOBOM_OSRM_TIMEOUT_S", "4.0")),

@@ -1,0 +1,45 @@
+{
+  "_comment": "배포 스모크 5좌표 (v2.3 5절 '픽스처 5좌표 스모크 테스트', 10절 게이트 2 '픽스처 5좌표의 기대값을 기록'). 좌표는 4-2 규약대로 [lon, lat] 5자리다. 실제 장소이므로 실데이터 배포본에서도 같은 좌표를 쓴다. 기대값만 data_version마다 달라진다.",
+  "coords": [
+    {
+      "id": "gongju-knu-gate",
+      "label": "공주대 신관캠퍼스 정문",
+      "lon": 127.1402,
+      "lat": 36.4713,
+      "density_profile": "capped",
+      "profile_note": "10분 내 카페·음식점이 20곳을 넘도록 배치해 capped(20+) 경로를 밟는다"
+    },
+    {
+      "id": "gongju-sanseong-market",
+      "label": "공주 산성시장",
+      "lon": 127.1189,
+      "lat": 36.4468,
+      "density_profile": "extra_batch",
+      "profile_note": "첫 60개 배치에서 20곳에 못 미치고 1km 내 후보가 남아 추가 배치를 반드시 부른다"
+    },
+    {
+      "id": "sejong-government-complex",
+      "label": "정부세종청사",
+      "lon": 127.2589,
+      "lat": 36.504,
+      "density_profile": "capped",
+      "profile_note": "capped"
+    },
+    {
+      "id": "daejeon-cnu-gate",
+      "label": "충남대 정문",
+      "lon": 127.345,
+      "lat": 36.368,
+      "density_profile": "extra_batch",
+      "profile_note": "추가 배치 두 번째 사례"
+    },
+    {
+      "id": "cheongju-cbnu-gate",
+      "label": "충북대 정문",
+      "lon": 127.454,
+      "lat": 36.628,
+      "density_profile": "capped",
+      "profile_note": "capped"
+    }
+  ]
+}

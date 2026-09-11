@@ -9,6 +9,12 @@ dependencies = [
     "cachetools==6.2.0",
 ]
 
+# 패키지를 명시한다. flat-layout 자동 탐색에 맡기면 최상위에 디렉터리가 하나 더
+# 생기는 순간 빌드가 거부된다(data/에서 실제로 겪었다. PR #11). 이미지 빌드는
+# 깨끗한 환경에서 비편집 설치를 하므로 그때 처음 드러난다.
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [project.optional-dependencies]
 dev = [
     "httpx==0.28.1",

@@ -1,16 +1,19 @@
 # 걸어봄 배포 구성
-# 기준: 현재 확정설계(v2.3) 4-1(웹 서버 Caddy, 배포 Docker Compose), 5절(서버 구성)
+# 기준: 현재 확정설계(v2.3) 4-1(웹 서버 Caddy, 배포 Docker Compose, 버전 고정), 5절(서버 구성)
 #
 # 외부 공개는 caddy만 담당한다. api·osrm에는 v2.3 5절에 따라 ports: 매핑을 만들지
 # 않는다. Docker가 연 포트는 UFW만으로 막히지 않기 때문이다.
 #
-# osrm 태그는 data/osrm/versions.json과 같아야 한다(v2.3 4-1 "PC 전처리 이미지 태그 =
-# 서버 이미지 태그"). api/app/contract.py의 OSRM_IMAGE_* 상수가 그 일치를 검사한다.
+# 모든 이미지를 태그 + digest로 고정한다. latest 금지.
+# osrm 태그·digest는 data/osrm/versions.json과 같아야 한다(v2.3 4-1 "PC 전처리 이미지
+# 태그 = 서버 이미지 태그"). api/app/contract.py의 OSRM_IMAGE_* 상수가 그 일치를 검사한다.
+#
+# Compose 프로젝트 이름은 `geoleobom`이고 작업 디렉터리는 서버의 /opt/geoleobom이다.
+# 인증서는 geoleobom_caddy_data 볼륨에 있으므로 이름을 바꾸면 재발급이 일어난다.
 
 services:
   caddy:
-    # 태그 고정. latest 금지.
-    image: caddy:2.11.4-alpine
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     container_name: geoleobom-caddy
     restart: unless-stopped
     ports:
@@ -21,10 +24,12 @@ services:
       - ./site:/srv/site:ro                   # 정적 파일 (읽기 전용)
       - caddy_data:/data                      # 인증서 보관 - 반드시 필요
       - caddy_config:/config                  # Caddy 내부 상태
+    # api에 depends_on을 걸지 않는다. api가 못 뜨면 공개 페이지까지 같이 내려간다.
+    # api가 없으면 /api/*만 502가 되고 정적 페이지는 그대로 열리는 편이 낫다.
 
   osrm:
-    # PC 전처리와 같은 태그·다이제스트. data/osrm/versions.json이 기준이다.
-    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    # PC 전처리와 같은 태그·digest. data/osrm/versions.json이 기준이다.
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1@sha256:855614a38f464b0558a2ad6eaa7cb8c139f39887da9b38b485ce453c6e6e6124
     container_name: geoleobom-osrm
     restart: unless-stopped
     # ports 매핑 없음 — 컨테이너 내부 네트워크로만 노출한다.
@@ -40,8 +45,15 @@ services:
       - /srv/geoleobom/data:/data:ro
 
   api:
-    # 이미지는 배포 파이프라인이 만든다. 서버에서 빌드하지 않는다(v2.3 4-1).
-    image: ${GEOLEOBOM_API_IMAGE:-geoleobom/api:local}
+    # 배포 파이프라인이 만든 이미지를 쓴다. 서버에서 빌드하지 않는다(v2.3 4-1).
+    # 실제 값은 deploy/deploy_api.sh가 /opt/geoleobom/.env에 커밋 SHA 태그 + digest로
+    # 적는다. 이미지는 커밋이 존재해야 만들어지므로 이 파일에 리터럴로 박을 수 없다.
+    #
+    # 아래 기본값은 **레지스트리에 존재하지 않는 태그**다. 환경변수 없이 기동하면
+    # pull 단계에서 바로 멈춘다. 그래야 설정이 빠졌을 때 옛 이미지가 조용히 도는
+    # 대신 눈에 보이는 실패가 난다. (`:?` 필수 문법은 쓰지 않는다. CI의
+    # `docker compose config`가 환경변수 없이 돌기 때문이다.)
+    image: ${GEOLEOBOM_API_IMAGE:-ghcr.io/misty-hollow/geoleobom-api:UNPINNED-run-deploy-api-sh}
     container_name: geoleobom-api
     restart: unless-stopped
     # ports 매핑 없음 — caddy만 /api/*를 프록시한다.
@@ -53,7 +65,10 @@ services:
       # 비어 있으면 api가 분석을 켜지 않고 503을 돌려준다. 잘못된 버전을 추측해
       # 엉뚱한 데이터로 답하는 것보다 낫다. 배포 스크립트가 값을 넣는다.
       GEOLEOBOM_DATA_VERSION: ${GEOLEOBOM_DATA_VERSION:-}
-      GEOLEOBOM_POI_DATE: ${GEOLEOBOM_POI_DATE:-unknown}
+      # 기본값을 두지 않는다. 기준일을 모르면 분석을 켜지 않는다(v2.3 4-5는 모든
+      # 화면에 poi_date를 노출하라고 정했다). "unknown" 같은 자리표시자를 화면에
+      # 보여주는 대신 503으로 거부한다.
+      GEOLEOBOM_POI_DATE: ${GEOLEOBOM_POI_DATE:-}
     volumes:
       - /srv/geoleobom/data:/data:ro
 

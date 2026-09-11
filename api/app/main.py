@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from app.analysis.errors import ProductError
 from app.analysis.models import AnalyzeResult, FacilityResult
 from app.contract import TIME_MODEL_VERSION
+from app.request_log import RequestMetrics, install_access_log
 from app.schemas import (
     AnalyzeResponse,
     Density,
@@ -39,6 +40,9 @@ NOT_IMPLEMENTED = "not implemented in skeleton"
 ANALYSIS_UNAVAILABLE = "analysis data or OSRM is not configured"
 
 app = FastAPI(title="걸어봄 API", version="0.0.1")
+# uvicorn 기본 접근 로그는 `--no-access-log`로 끄고 이 미들웨어가 대신 쓴다.
+# 기본 로그는 쿼리 문자열(좌표)이 든 원본 요청 줄을 남겨 v2.3 5절을 어긴다.
+install_access_log(app)
 settings = load_settings()
 _service: AnalysisService | None = None
 
@@ -72,8 +76,11 @@ def health() -> HealthResponse:
 
 
 @app.get("/api/analyze", response_model=AnalyzeResponse)
-def analyze(lon: float = Query(...), lat: float = Query(...)) -> AnalyzeResponse:
-    return to_response(get_service().analyze(lon=lon, lat=lat))
+def analyze(request: Request, lon: float = Query(...), lat: float = Query(...)) -> AnalyzeResponse:
+    metrics = getattr(request.state, "metrics", None)
+    if not isinstance(metrics, RequestMetrics):
+        metrics = None  # 미들웨어 없이 직접 호출된 경우(테스트 등)
+    return to_response(get_service().analyze(lon=lon, lat=lat, metrics=metrics))
 
 
 @app.get("/api/route", response_model=RouteResponse)
