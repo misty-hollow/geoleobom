@@ -42,8 +42,8 @@ STATUS.md      현재 상태와 다음 작업
 | npm | 11.11.0 | `C:\Program Files\nodejs\npm.ps1` |
 | Python (기존) | 3.14.4 | `C:\Users\sdsdo\AppData\Local\Python\pythoncore-3.14-64\python.exe` — 삭제하지 않음 |
 | **Python (프로젝트)** | **3.12.10** | `C:\Users\sdsdo\AppData\Local\Python\pythoncore-3.12-64\python.exe` — 2026-09-11 `py install 3.12`로 설치 |
-| Docker | 미설치 | — (관리자 권한·재부팅 필요. 데이터·OSRM 카드 전에 설치) |
-| WSL | 미설치 | — |
+| Docker Engine | 29.7.2 | `C:\Users\sdsdo\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe` — **PATH 미등록**. Compose plugin v5.5.1, context `desktop-linux` |
+| WSL | WSL2 | `docker-desktop` 배포판만 (Docker 엔진용) |
 
 ## 설치 (2026-09-11 실제 실행해 확인)
 

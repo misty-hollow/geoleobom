@@ -59,15 +59,15 @@
 | 항목 | 결정 | 이유 | 상태 |
 |---|---|---|---|
 | Git·Node·Python 위치 | **Windows 하나로 통일** | 두 환경을 번갈아 쓰지 않는다. 현재 Windows 도구가 모두 정상 동작 | 승인됨 (2026-09-10) |
-| WSL2 | **직접 사용하지 않음.** Docker Desktop을 설치할 때 Docker 엔진 용도로만 쓴다 | Windows 11 Home은 Docker가 WSL2 방식으로만 동작. 별도 Ubuntu 개발환경은 만들지 않음 | 승인됨 (2026-09-10), **아직 설치하지 않음** |
-| Docker Desktop | Week 1 말 ~ Week 2 초에 설치 | OSRM 전처리와 로컬 OSRM 실행에 필요. Week 1의 VPS·HTTPS 작업에는 불필요 | 승인됨 (2026-09-10), 설치 미실행 |
+| WSL2 | **직접 사용하지 않음.** Docker 엔진 용도로만 쓴다 | Windows 11 Home은 Docker가 WSL2 방식으로만 동작. 별도 Ubuntu 개발환경은 만들지 않음 | 승인됨 (2026-09-10). **2026-09-11 확인: `docker-desktop` 배포판 하나만 실행 중이며 별도 Ubuntu 배포판은 없다** |
+| Docker Desktop | Week 1 말 ~ Week 2 초에 설치 | OSRM 전처리와 로컬 OSRM 실행에 필요 | 승인됨 (2026-09-10). **설치 완료 (2026-09-11)** — 4절 참조 |
 | 프로젝트 Python | **3.12로 고정.** 기존 3.14.4는 지우지 않고 그대로 둠 | GeoPandas 계열의 Windows 설치 안정성, 서버(Ubuntu 24.04) 기본 버전과 일치 | 승인됨 (2026-09-10). **3.12.10 설치 완료 (2026-09-11), 3.14.4 유지** |
 | Node | **24.14.1 그대로 사용** | 장기 지원(LTS) 버전. 버전 관리 도구는 두지 않음 | 승인됨 (2026-09-10) |
 | 줄바꿈 | 텍스트 파일은 저장소에 **LF**로 저장 | Windows에서 만든 셸·설정 파일이 Linux 서버에서 깨지지 않게 함. `.gitattributes`가 담당 | 승인됨 (2026-09-10) |
 
 **바꿀 조건**: Windows에서 GeoPandas 설치가 두 번 연속 실패하거나, 전국 OSRM 전처리 속도가 작업을 막을 정도이면 **데이터 생성 작업만** WSL2로 옮긴다. 그 경우에도 앱 코드 개발은 Windows에 남긴다.
 
-## 4. 확인된 PC 환경 (2026-09-10, 읽기 전용 확인)
+## 4. 확인된 PC 환경 (2026-09-10 확인, Docker·Python은 2026-09-11 설치 후 재확인)
 
 | 항목 | 값 |
 |---|---|
@@ -80,8 +80,11 @@
 | npm | 11.11.0 |
 | Python | 3.14.4 — `C:\Users\sdsdo\AppData\Local\Python\pythoncore-3.14-64\python.exe` |
 | pip | 26.0.1 |
-| Docker | 미설치 |
-| WSL | 미설치 (가상화 기능은 사용 가능) |
+| Docker | **Engine 29.7.2** (client·server 동일, `linux/amd64`) — 사용자 스코프 설치라 실행 파일은 `C:\Users\sdsdo\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe`이고 **PATH에 등록돼 있지 않다** |
+| Docker Compose | **v5.5.1** (plugin) |
+| Docker context | `desktop-linux` · Linux 컨테이너 실행 확인 (`hello-world`) |
+| Docker 엔진 자원 | 12 CPU · 약 15.4GB · 스토리지 드라이버 `overlayfs` |
+| WSL | **WSL2. `docker-desktop` 배포판 하나만 실행** (Docker 엔진용). 별도 Ubuntu 개발환경 없음 |
 | SSH 클라이언트 | 있음 — `C:\WINDOWS\System32\OpenSSH\ssh.exe` |
 | VS Code 확장 | Claude Code, ChatGPT(Codex), Python |
 
@@ -117,7 +120,7 @@ API·계산 의미·저장 데이터·스택·동결된 서버 규약 변경은 
 - **게이트 1의 규약 고정 항목**: v2.2 10절이 요구하는 "좌표 순서·5자리 규약, 캐시 키 구성, k 계수·`time_model_version`, 밀도 집계 상태, 최근접 상태 4종"의 PROJECT.md 기록은 **완료 (2026-09-11).** 기록 위치는 8절이다.
 - **v2.1·v2.2 4-3 설명 정정 메모** (개발 운영 가이드 14절): v2.1 4-3(v2.2 4-3도 같은 문장)의 "`sources`/`destinations`를 생략하면 161×161 행렬이 되어 `--max-table-size 200`을 초과한다"는 **설명만 산술상 잘못됐다**(161² < 200²). **제품·아키텍처·구현 규약 변경은 아니다.** `--max-table-size 200`, `sources=0`·`destinations` 명시, FastAPI 목적지 ≤160 가드, 실제 1×160 응답 검사는 **그대로 유지한다.** **v2.1·v2.2 원문은 수정하지 않는다.** v2.2는 서버 관련 변경만 담았으므로 이 문장도 그대로 남아 있다. 이 메모가 해당 설명의 기록이다.
 - Git 저장소 초기화, Git 사용자 이름·이메일 설정: **완료.** 작성자 정보는 이 저장소 `--local` 설정에만 등록했다.
-- Docker Desktop 설치: 미완료. **Python 3.12.10 설치: 완료 (2026-09-11). 기존 3.14.4는 그대로 둠.**
+- **Docker Desktop 설치: 완료 (2026-09-11).** Python 3.12.10 설치: 완료 (2026-09-11), 기존 3.14.4는 그대로 둠.
 
 ## 8. 게이트 1 — API 계약 규약 고정 확인 (2026-09-11)
 
