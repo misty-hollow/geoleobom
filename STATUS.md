@@ -26,7 +26,7 @@
 - **후보 제한(20개)을 실제로 풀어 측정했다.** 반경 3km 안 후보 전부를 OSRM에 물어 비교한 결과 **1등이 달라진 조합이 없었다**(25개 중 2개는 후보가 20개 이하라 제한 자체가 안 걸린다). v2.3 3절의 고지("모든 시설의 최단시간을 보장하지 않는다")는 그대로지만 대표 5지점에서는 손해가 없었다.
 - **다음 작업: Week 3 프론트.** 카카오 개발자 앱 등록과 도메인 등록이 끝났으므로 검색·지도 핀·결과 화면을 붙일 수 있다. `/api/search`(카카오 프록시)와 `/api/route`가 501로 남아 있고, 게이트 2의 응답시간 항목이 그 둘을 요구하므로 함께 닫힌다.
 - **B에게 넘길 것**: `data/data/mapping.py`의 `REVIEW_ITEMS` 6건과 `data.gate2_quality`가 뽑은 공주 표본(편의점 20건·마트 20건). 분류 타당성·시설 존재·폐업 판단은 사람이 해야 한다(v2.3 7절).
-- **작은 후속**: 실측 검증 구역 폴리곤(Week 6 실측 후), `data-checks`·`api-image` 필수 검사 승격(보호 규칙 1회 변경).
+- **작은 후속**: 실측 검증 구역 폴리곤(Week 6 실측 후).
 - Codex 독립 검토 자동 호출 경로 없음(`codex` CLI 미설치, VS Code 확장만). B·C PR은 사용자가 다른 담당에게 검토 요청 → 완료 전까지 draft.
 - 외부 대기 작업: 카카오 저장·공유 정책 문의와 위치정보법 확인 채널 질의를 정리해 사용자/C가 발송한다. 발송 여부는 아직 미확인.
 
@@ -34,8 +34,10 @@
 
 - main `63467d781644d3664b43ad482b9a1639b5317be2` — PR #15 병합 완료. 현재 기준 문서는 `docs/걸어봄_확정설계_v2.3.md`다.
 - **이 표의 SHA는 상시 동기화하지 않는다**(AGENTS.md 6절). 병합 때 갱신하고, 정확한 값은 `git rev-parse origin/main`으로 확인한다.
-- **main required status checks 3개**: `repository-baseline`, `api-checks`, `web-build`. 모두 GitHub Actions(app_id 15368), `strict=true`. 관리자 적용·force push/삭제 차단·선형 이력·대화 해결 필수는 그대로다.
-- **CI에 검사 2개가 늘었다**: `api-image`(Dockerfile 빌드 가능 여부, PR에서는 게재하지 않음)와 `repository-baseline` 안의 `deploy/` 셸·파이썬 린트. `api-image`와 `data-checks`는 아직 필수 검사가 아니며 필수화는 보호 규칙 변경(사용자 명령 1회)이다.
+- **main required status checks 5개** (2026-09-12 사용자 승인으로 2개 승격): `repository-baseline`, `api-checks`, `data-checks`, `web-build`, `api-image`. 모두 GitHub Actions(app_id 15368), `strict=true`. 관리자 적용·force push/삭제 차단·선형 이력·대화 해결 필수는 **바꾸지 않았다.** 선언본 `.github/main-protection.json`이 실제 설정과 같은지 확인했다.
+  - `data-checks` 승격 이유: 수집 폴리곤 불변식·`validate_gpkg`·매핑표 검사가 **이 작업에서만** 돈다.
+  - `api-image` 승격 이유: PR #13에서 이미지는 빌드됐는데 컨테이너가 기동하지 못했다. 이 검사가 `docker run`으로 기동까지 본다.
+  - 되돌리려면 같은 `gh api -X PUT`으로 두 항목을 빼면 된다. 코드·데이터·서버는 바뀌지 않는다.
 - 자동 병합 경로 검증 완료: PR #6에서 `gh pr merge --auto` 예약 후 CI 통과 직후 GitHub가 squash merge·브랜치 삭제 수행.
 
 ## 막힌 점
@@ -44,7 +46,6 @@
 - **분류 타당성과 시설 존재를 확인하지 않았다.** 파이프라인은 매핑표를 적용한 것이지 검수한 것이 아니다. 원본에 영업 상태 컬럼이 없어 **폐업한 곳을 걸러내지 못한다.** `mapping.py`의 `REVIEW_ITEMS` 6건이 사람 확인 대상이다.
 - **`poi_date`가 2022-11-21이다.** 전체의 98.2%는 2026-06-30인데, 공주시 공원 21행이 2022년 기준일이라 가장 오래된 값이 대표가 됐다. 과대 표시를 피하려고 `min`을 쓴 결과이며, 화면에 보여 줄 값으로 적절한지는 판단이 필요하다.
 - **실측 검증 구역 폴리곤이 없다.** `verified_area`는 계속 False다. 공주 실측이 Week 6이라 그때 정한다.
-- `data-checks`·`api-image`는 CI에 있지만 아직 main 병합 필수 검사가 아니다. 필수화는 보호 규칙 변경(사용자 명령 1회).
 - 게이트 2 성능·한국 내 응답시간 측정의 지연은 자동 유예나 통과로 취급하지 않는다.
 
 ## 게이트 1 (확정설계 10절)
