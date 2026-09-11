@@ -7,6 +7,11 @@ dependencies = [
     "fastapi==0.141.1",
     "uvicorn[standard]==0.52.4",
     "cachetools==6.2.0",
+    # 런타임이다. app/adapters/osrm.py가 모듈 수준에서 import한다. dev에 두었더니
+    # 개발 PC의 editable 설치에서는 늘 있어서 드러나지 않다가, 이미지에서 API가
+    # 기동조차 못 했다(ModuleNotFoundError). tests/test_runtime_dependencies.py가
+    # 이 종류의 실수를 잡는다.
+    "httpx==0.28.1",
 ]
 
 # 패키지를 명시한다. flat-layout 자동 탐색에 맡기면 최상위에 디렉터리가 하나 더
@@ -17,7 +22,6 @@ include = ["app*"]
 
 [project.optional-dependencies]
 dev = [
-    "httpx==0.28.1",
     "pytest==9.1.1",
     "ruff==0.16.7",
 ]
