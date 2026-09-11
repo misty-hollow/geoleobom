@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -37,6 +38,11 @@ logger = logging.getLogger("geoleobom.access")
 
 UNMATCHED_ROUTE = "unmatched"
 REQUEST_ID_BYTES = 8
+
+# INFO로 요청 URL을 통째로 찍는 라이브러리들. `/nearest/v1/foot/127.14020,36.47130`,
+# `/table/...` 경로에 출발지와 목적지 좌표가 그대로 들어 있어 v2.3 5절을 어긴다.
+# 이 앱이 로깅을 설정하는 이상 이 입막음도 같이 책임진다.
+COORDINATE_LEAKING_LOGGERS = ("httpx", "httpcore")
 
 
 @dataclass
@@ -112,5 +118,29 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             logger.info("%s", entry.render())
 
 
+def configure_logging(stream=None) -> None:
+    """접근 로그를 실제로 내보내도록 로거를 세운다.
+
+    uvicorn 기본 설정은 `uvicorn`·`uvicorn.error`·`uvicorn.access`만 구성하고 root는
+    건드리지 않는다. 그래서 이 로거를 그냥 두면 유효 레벨이 WARNING이고 핸들러도 없어
+    **`logger.info(...)`가 레코드조차 만들지 않는다.** `--no-access-log`로 uvicorn 로그를
+    끈 상태이므로 그대로 두면 요청 로그가 통째로 사라진다.
+
+    `basicConfig`로 root를 INFO로 올리지 않는다. 그렇게 하면 httpx가 OSRM 요청 URL을
+    INFO로 찍어 **좌표가 바로 샌다.** 이 로거에만 핸들러를 붙이고 전파를 끊는다.
+    """
+    logger.setLevel(logging.INFO)
+    logger.propagate = False  # root로 새어나가 다른 포맷으로 중복 기록되지 않게 한다
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout if stream is None else stream)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+
+    # 누군가 나중에 root를 INFO로 올려도 좌표가 새지 않게 못박는다.
+    for name in COORDINATE_LEAKING_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def install_access_log(app: ASGIApp) -> None:
+    configure_logging()
     app.add_middleware(AccessLogMiddleware)  # type: ignore[arg-type]

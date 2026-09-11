@@ -50,9 +50,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "== 1. 레지스트리에서 digest 조회 ($IMAGE_REPO:$COMMIT_SHA)"
 # 태그는 옮겨질 수 있으므로 배포 시점의 digest를 고정해 그 값으로 실행한다.
-DIGEST="$(ssh "$HOST" "docker pull --quiet '$IMAGE_REPO:$COMMIT_SHA' >/dev/null && \
-	docker image inspect '$IMAGE_REPO:$COMMIT_SHA' --format '{{index .RepoDigests 0}}'" |
-	sed 's/.*@//' | tr -d '\r')"
+#
+# `docker image inspect`의 RepoDigests[0]을 쓰지 않는다. 같은 image id가 여러 digest로
+# 알려져 있으면(같은 태그를 다른 manifest로 덮어쓴 뒤 등) 0번이 방금 pull한 태그의
+# digest라는 보장이 없다. imagetools는 레지스트리에 **태그를 직접 물어** 답을 준다.
+DIGEST="$(ssh "$HOST" "docker buildx imagetools inspect '$IMAGE_REPO:$COMMIT_SHA' --format '{{.Manifest.Digest}}'" | tr -d '\r\n')"
 
 if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
 	echo "digest를 얻지 못했다: '$DIGEST'" >&2
@@ -60,6 +62,9 @@ if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
 fi
 PINNED="$IMAGE_REPO:$COMMIT_SHA@$DIGEST"
 echo "   $PINNED"
+
+# digest로 pull한다. 태그로 받아 온 것이 아니라 이 바이트를 받았음을 확실히 한다.
+ssh "$HOST" "docker pull --quiet '$PINNED'" >/dev/null
 
 echo "== 2. 배포 설정 복사"
 scp -q "$REPO_ROOT/deploy/compose.yaml" "$REPO_ROOT/deploy/Caddyfile" "$HOST:$REMOTE_DIR/"
@@ -82,7 +87,7 @@ echo "GEOLEOBOM_API_IMAGE=$PINNED" >>.env.next
 mv .env.next .env
 chmod 600 .env
 
-docker compose -f compose.yaml pull api
+# 위에서 digest로 이미 받았다. compose pull은 태그 기준이라 여기서 다시 부르지 않는다.
 docker compose -f compose.yaml up -d
 
 # 태그가 아니라 실제로 돌고 있는 이미지의 digest를 확인한다.

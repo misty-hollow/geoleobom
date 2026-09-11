@@ -152,8 +152,10 @@ python deploy/smoke.py --base-url https://geoleobom.kr --baseline deploy/smoke_b
 
 - `deploy_data.sh`는 v2.3 5절의 교체 절차를 그대로 따른다. 업로드 → `api`·`osrm` 정지 → `current` 참조 변경 → 컨테이너 재생성 → 직전 버전 보존. **실행 중 파일 덮어쓰기와 단순 `restart`로 끝내지 않는다.** 기준일은 버전 디렉터리의 `poi_date.txt`에 함께 남아 롤백이 데이터와 기준일을 짝지어 되돌린다.
 - `deploy_api.sh`는 태그만 믿지 않는다. 레지스트리에서 **digest를 조회해 태그 + digest로 고정**하고, 기동 뒤 실제로 그 이미지가 돌고 있는지 컨테이너에서 대조한다.
-- 롤백은 `bash deploy/rollback.sh code` 또는 `... data`다. 데이터 롤백은 **아무것도 지우지 않고** `current`/`previous` 링크만 맞바꾼다.
+- 롤백은 `bash deploy/rollback.sh code` 또는 `... data`다. 데이터 롤백은 **아무것도 지우지 않고** `current`/`previous` 링크만 맞바꾼다. 사전 조건(직전 버전의 데이터·기준일 존재, `previous != current`)을 **서비스를 정지하기 전에** 모두 확인하므로, 되돌릴 수 없는 상황이면 아무것도 건드리지 않고 멈춘다.
 - 되돌린 뒤에는 반드시 `deploy/smoke.py`로 실제 응답을 확인한다. 스크립트가 성공했다는 것만으로 복구됐다고 하지 않는다.
+- **첫 배포에서는 데이터가 먼저다.** 아직 이미지가 없으면 `deploy_data.sh`가 `osrm`만 올리고 `api`는 건너뛴다. 이미지가 없는 채로 `api`를 올리려 하면 compose 기본 태그를 pull하다 실패하는데, 그러면 데이터 반영까지 같이 실패한 것처럼 보인다.
+- **`deploy_api.sh`는 caddy 컨테이너도 재생성한다.** compose의 caddy 이미지가 태그에서 태그 + digest로 바뀌었기 때문이다. 공개 페이지가 수 초 끊긴다. 인증서는 `geoleobom_caddy_data` 볼륨에 있어 보존된다.
 
 ### 게이트 2 측정 명령
 

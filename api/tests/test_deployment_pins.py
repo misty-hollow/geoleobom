@@ -24,6 +24,24 @@ DIGEST = r"@sha256:[0-9a-f]{64}"
 API_IMAGE_VAR = "${GEOLEOBOM_API_IMAGE"
 
 
+def _dockerfile_cmd() -> str:
+    """CMD 지시자만 잘라낸다.
+
+    파일 전체를 문자열로 검사하면 **주석에만 있어도 통과한다.** 실제로 이 파일의
+    머리말 주석이 `--no-access-log`를 설명하고 있어, CMD에서 지워도 검사가 통과했다.
+    """
+    lines = API_DOCKERFILE.read_text(encoding="utf-8").splitlines()
+    collected: list[str] = []
+    for index, line in enumerate(lines):
+        if line.startswith("CMD"):
+            collected.append(line)
+            while collected[-1].rstrip().endswith("\\") and index + len(collected) < len(lines):
+                collected.append(lines[index + len(collected)])
+            break
+    assert collected, "CMD 줄이 없다"
+    return "\n".join(collected)
+
+
 def _image_lines() -> list[str]:
     return [
         line.strip()
@@ -74,14 +92,12 @@ def test_api_dockerfile_disables_the_default_access_log():
     uvicorn 기본 접근 로그는 `"GET /api/analyze?lon=..&lat=.. HTTP/1.1"`을 그대로
     남기므로 켜두면 그 자체가 규약 위반이다.
     """
-    dockerfile = API_DOCKERFILE.read_text(encoding="utf-8")
-    assert "--no-access-log" in dockerfile
+    assert "--no-access-log" in _dockerfile_cmd()
 
 
 def test_api_dockerfile_runs_one_worker():
     """v2.3 5절: FastAPI 워커 1."""
-    dockerfile = API_DOCKERFILE.read_text(encoding="utf-8")
-    assert '"--workers", "1"' in dockerfile
+    assert '"--workers", "1"' in _dockerfile_cmd()
 
 
 def test_api_dockerfile_does_not_run_as_root():

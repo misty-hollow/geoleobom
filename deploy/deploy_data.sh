@@ -80,7 +80,13 @@ cd "$REMOTE_DIR"
 
 echo "== 1. 새 버전 디렉터리 확인"
 test -f "\$DATA_ROOT/\$VERSION/poi.gpkg" || { echo "poi.gpkg 없음"; exit 1; }
-ls "\$DATA_ROOT/\$VERSION/osrm"/*.osrm.fileIndex >/dev/null || { echo "osrm 파일 세트 없음"; exit 1; }
+# compose의 osrm command가 이 이름을 고정한다. 다른 이름이면 검사만 통과하고
+# osrm이 기동에 실패해 재시작을 반복한다.
+test -f "\$DATA_ROOT/\$VERSION/osrm/chungcheong.osrm.fileIndex" || {
+	echo "osrm 파일 세트가 없거나 이름이 chungcheong.osrm.*가 아니다 (compose osrm command와 맞춰야 한다)"
+	ls "\$DATA_ROOT/\$VERSION/osrm" 2>/dev/null | head
+	exit 1
+}
 du -sh "\$DATA_ROOT/\$VERSION"
 
 echo "== 2. api·osrm 정지 (실행 중 덮어쓰기를 하지 않는다)"
@@ -95,8 +101,15 @@ echo "\$POI_DATE" > "\$DATA_ROOT/\$VERSION/poi_date.txt"
 echo "== 4. 참조 변경 (직전 버전을 previous로 보존)"
 if [[ -L "\$DATA_ROOT/current" ]]; then
 	PREVIOUS="\$(readlink "\$DATA_ROOT/current")"
-	echo "   직전 버전: \$PREVIOUS"
-	ln -sfn "\$PREVIOUS" "\$DATA_ROOT/previous"
+	# 같은 버전을 다시 지정하는 경우(재기동·재지정) previous를 덮어쓰지 않는다.
+	# 덮어쓰면 previous == current가 되어 롤백이 제자리걸음을 하며 "되돌렸다"고
+	# 보고한다. v2.3 5절의 "직전 버전 1개 보존(롤백용)"이 깨진다.
+	if [[ -n "\$PREVIOUS" && "\$PREVIOUS" != "\$VERSION" ]]; then
+		echo "   직전 버전: \$PREVIOUS"
+		ln -sfn "\$PREVIOUS" "\$DATA_ROOT/previous"
+	else
+		echo "   같은 버전 재지정 — previous를 그대로 둔다"
+	fi
 fi
 ln -sfn "\$VERSION" "\$DATA_ROOT/current"
 ls -l "\$DATA_ROOT/current" "\$DATA_ROOT/previous" 2>/dev/null || true
@@ -110,7 +123,15 @@ mv .env.next .env
 chmod 600 .env
 
 echo "== 5. 재기동 (마운트·환경이 바뀌었으므로 컨테이너를 재생성한다)"
-docker compose -f compose.yaml up -d --force-recreate api osrm
+# 아직 이미지를 배포하지 않았으면 api를 올리지 않는다. compose 기본값은 레지스트리에
+# 없는 태그라 pull이 실패하고, 그러면 데이터 반영까지 같이 실패한 것처럼 보인다.
+# 첫 배포에서는 데이터를 먼저 올리고 deploy_api.sh가 api를 붙이는 순서가 된다.
+if grep -q '^GEOLEOBOM_API_IMAGE=' .env; then
+	docker compose -f compose.yaml up -d --force-recreate api osrm
+else
+	echo "   GEOLEOBOM_API_IMAGE가 아직 없다 — osrm만 올린다. 다음에 deploy_api.sh를 돌린다."
+	docker compose -f compose.yaml up -d --force-recreate osrm
+fi
 docker compose -f compose.yaml ps
 
 echo "== 6. 직전 버전 1개만 남기고 정리 대상 확인 (삭제는 하지 않는다)"

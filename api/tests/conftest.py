@@ -111,3 +111,27 @@ def dense_gpkg(tmp_path_factory: pytest.TempPathFactory) -> Path:
             fid += 1
     path = tmp_path_factory.mktemp("grid") / "poi.gpkg"
     return build_sqlite_gpkg(path, rows)
+
+
+@pytest.fixture
+def access_log():
+    """접근 로그가 **실제로 쓰인 내용**을 읽는다.
+
+    `caplog`를 쓰지 않는다. 이 로거는 `propagate = False`라(root로 새어나가 중복
+    기록되지 않게 한다) pytest의 caplog 핸들러가 root에 붙어 있으면 잡히지 않거나
+    import 순서에 따라 잡히기도 한다. 그런 검사는 조용히 공허해질 수 있다.
+    운영에서 stdout으로 나가는 바로 그 핸들러의 스트림을 가로채 읽는다.
+    """
+    import io
+
+    from app.request_log import configure_logging, logger
+
+    configure_logging()
+    handler = logger.handlers[0]
+    buffer = io.StringIO()
+    original = handler.stream
+    handler.stream = buffer
+    try:
+        yield buffer
+    finally:
+        handler.stream = original

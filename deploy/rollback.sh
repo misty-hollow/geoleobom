@@ -65,16 +65,20 @@ test -L "$DATA_ROOT/previous" || { echo "previous 링크가 없다. 되돌릴 �
 PREV="\$(readlink "$DATA_ROOT/previous")"
 CURR="\$(readlink "$DATA_ROOT/current")"
 echo "current=\$CURR -> previous=\$PREV 로 되돌린다"
+
+# --- 사전조건은 서비스를 건드리기 **전에** 전부 확인한다 ---
+# 정지·링크 교체 뒤에 검사하면, 검사가 실패했을 때 서비스는 내려간 채 current와
+# .env가 어긋난 상태로 남는다. 되돌리는 도중에 더 나쁜 상태를 만들지 않는다.
 test -f "$DATA_ROOT/\$PREV/poi.gpkg" || { echo "직전 버전 데이터가 온전하지 않다"; exit 1; }
+test "\$PREV" != "\$CURR" || { echo "previous와 current가 같은 버전이다. 되돌릴 곳이 없다."; exit 1; }
+# 기준일은 버전 디렉터리가 들고 있다. 데이터와 기준일을 항상 짝지어 되돌린다.
+PREV_POI_DATE="\$(cat "$DATA_ROOT/\$PREV/poi_date.txt" 2>/dev/null || true)"
+test -n "\$PREV_POI_DATE" || { echo "직전 버전에 poi_date.txt가 없다. 기준일을 알 수 없어 멈춘다."; exit 1; }
 
 docker compose -f compose.yaml stop api osrm
 # 링크만 맞바꾼다. 어느 쪽도 지우지 않으므로 다시 앞으로 갈 수 있다.
 ln -sfn "\$CURR" "$DATA_ROOT/previous"
 ln -sfn "\$PREV" "$DATA_ROOT/current"
-
-# 기준일은 버전 디렉터리가 들고 있다. 데이터와 기준일을 항상 짝지어 되돌린다.
-PREV_POI_DATE="\$(cat "$DATA_ROOT/\$PREV/poi_date.txt" 2>/dev/null || true)"
-test -n "\$PREV_POI_DATE" || { echo "직전 버전에 poi_date.txt가 없다. 기준일을 알 수 없어 멈춘다."; exit 1; }
 
 grep -v -e '^GEOLEOBOM_DATA_VERSION=' -e '^GEOLEOBOM_POI_DATE=' .env > .env.next || true
 echo "GEOLEOBOM_DATA_VERSION=\$PREV" >> .env.next

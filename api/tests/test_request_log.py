@@ -5,10 +5,15 @@
 Caddy와 API 로그 **모두에서** 제외해야 한다.
 
 여기서 검사하는 것은 **API가 직접 만드는 로그**다. Caddy 쪽은 배포 설정에서 따로 확인한다.
+
+`caplog`를 쓰지 않고 `access_log` 픽스처로 **핸들러에 실제로 쓰인 내용**을 읽는다.
+이 로거는 `propagate = False`라 pytest의 caplog 핸들러(root에 붙는다)가 잡지 못하거나
+import 순서에 따라 잡기도 한다. 그런 검사는 로그가 통째로 사라져도 조용히 통과할 수 있다.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 
 import pytest
@@ -43,16 +48,22 @@ def logged_app() -> FastAPI:
     return app
 
 
-def _lines(caplog: pytest.LogCaptureFixture) -> list[str]:
-    return [record.getMessage() for record in caplog.records if record.name == "geoleobom.access"]
+def _written(access_log: io.StringIO) -> str:
+    return access_log.getvalue()
 
 
-def test_query_string_never_reaches_the_log(logged_app, caplog):
-    with caplog.at_level(logging.INFO, logger="geoleobom.access"):
-        TestClient(logged_app).get(f"/api/analyze?lon={SECRET_LON}&lat={SECRET_LAT}")
+def _lines(access_log: io.StringIO) -> list[str]:
+    """포맷터가 앞에 붙인 시각·레벨을 떼어낸 로그 줄."""
+    return [
+        line.split("INFO ", 1)[-1] for line in _written(access_log).splitlines() if line.strip()
+    ]
 
-    joined = "\n".join(_lines(caplog))
-    assert joined, "접근 로그가 한 줄도 남지 않았다"
+
+def test_query_string_never_reaches_the_log(logged_app, access_log):
+    TestClient(logged_app).get(f"/api/analyze?lon={SECRET_LON}&lat={SECRET_LAT}")
+
+    joined = _written(access_log)
+    assert joined.strip(), "접근 로그가 한 줄도 남지 않았다"
     assert SECRET_LON not in joined
     assert SECRET_LAT not in joined
     assert "lon=" not in joined and "lat=" not in joined
@@ -60,60 +71,61 @@ def test_query_string_never_reaches_the_log(logged_app, caplog):
     assert "status=200" in joined
 
 
-def test_path_parameters_are_logged_as_a_template_not_a_value(logged_app, caplog):
-    with caplog.at_level(logging.INFO, logger="geoleobom.access"):
-        TestClient(logged_app).get(f"/p/{SECRET_LAT},{SECRET_LON}")
+def test_path_parameters_are_logged_as_a_template_not_a_value(logged_app, access_log):
+    TestClient(logged_app).get(f"/p/{SECRET_LAT},{SECRET_LON}")
 
-    joined = "\n".join(_lines(caplog))
+    joined = _written(access_log)
     # 경로 파라미터 자체가 좌표다. 값이 아니라 템플릿만 남아야 한다.
     assert SECRET_LON not in joined
     assert SECRET_LAT not in joined
     assert "route=/p/{lat_lng}" in joined
 
 
-def test_unmatched_paths_are_not_echoed_back(logged_app, caplog):
+def test_unmatched_paths_are_not_echoed_back(logged_app, access_log):
     # 404 경로를 그대로 적으면 그 경로가 좌표일 수 있다.
-    with caplog.at_level(logging.INFO, logger="geoleobom.access"):
-        TestClient(logged_app).get(f"/{SECRET_LAT},{SECRET_LON}")
+    TestClient(logged_app).get(f"/{SECRET_LAT},{SECRET_LON}")
 
-    joined = "\n".join(_lines(caplog))
+    joined = _written(access_log)
     assert SECRET_LON not in joined
     assert SECRET_LAT not in joined
     assert f"route={UNMATCHED_ROUTE}" in joined
     assert "status=404" in joined
 
 
-def test_search_terms_never_reach_the_log(logged_app, caplog):
-    with caplog.at_level(logging.INFO, logger="geoleobom.access"):
-        TestClient(logged_app).get(
-            "/api/analyze", params={"lon": 1.0, "lat": 2.0, "q": SECRET_QUERY}
-        )
+def test_search_terms_never_reach_the_log(logged_app, access_log):
+    TestClient(logged_app).get("/api/analyze", params={"lon": 1.0, "lat": 2.0, "q": SECRET_QUERY})
 
-    joined = "\n".join(_lines(caplog))
+    joined = _written(access_log)
     assert SECRET_QUERY not in joined
     # URL 인코딩된 형태로도 새면 안 된다.
     assert "%EA%B3%B5" not in joined
 
 
-def test_unhandled_errors_are_still_logged_with_a_status(logged_app, caplog):
-    client = TestClient(logged_app, raise_server_exceptions=False)
-    with caplog.at_level(logging.INFO, logger="geoleobom.access"):
-        client.get("/api/boom")
+def test_unhandled_errors_are_still_logged_with_a_status(logged_app, access_log):
+    TestClient(logged_app, raise_server_exceptions=False).get("/api/boom")
 
-    joined = "\n".join(_lines(caplog))
+    joined = _written(access_log)
     assert "route=/api/boom" in joined
     assert "status=500" in joined
     # 예외 메시지는 접근 로그가 담당하지 않는다.
     assert "terrible failure" not in joined
 
 
-def test_request_ids_differ_between_requests(logged_app, caplog):
-    client = TestClient(logged_app)
-    with caplog.at_level(logging.INFO, logger="geoleobom.access"):
-        client.get("/api/analyze", params={"lon": 1.0, "lat": 2.0})
-        client.get("/api/analyze", params={"lon": 1.0, "lat": 2.0})
+def test_validation_failures_are_logged_without_the_rejected_value(logged_app, access_log):
+    """422는 FastAPI가 만든다(4-4 '계약 밖'). 그래도 좌표를 남기면 안 된다."""
+    TestClient(logged_app).get("/api/analyze", params={"lon": SECRET_LON, "lat": "not-a-number"})
 
-    ids = [line.split(" ")[0] for line in _lines(caplog)]
+    joined = _written(access_log)
+    assert "status=422" in joined
+    assert SECRET_LON not in joined
+
+
+def test_request_ids_differ_between_requests(logged_app, access_log):
+    client = TestClient(logged_app)
+    client.get("/api/analyze", params={"lon": 1.0, "lat": 2.0})
+    client.get("/api/analyze", params={"lon": 1.0, "lat": 2.0})
+
+    ids = [line.split(" ")[0] for line in _lines(access_log)]
     assert len(ids) == 2
     # 좌표에서 유도한 해시라면 같은 좌표가 같은 id가 되어 재식별에 쓰일 수 있다.
     assert ids[0] != ids[1]
@@ -128,3 +140,38 @@ def test_analysis_fields_appear_only_when_an_analysis_ran():
     metrics.record_table(160)
     metrics.record_table(20)
     assert metrics.as_fields() == {"cache": "miss", "destinations": 180, "batches": 2}
+
+
+def test_the_logger_is_configured_to_actually_emit():
+    """운영 구성에서 로그가 실제로 나가는지.
+
+    초기 구현이 여기서 틀렸다. uvicorn 기본 설정은 root를 건드리지 않아 이 로거의
+    유효 레벨이 WARNING이고 핸들러도 없었다. `--no-access-log`와 합쳐져 요청 로그가
+    **통째로 사라졌는데** caplog가 레벨을 강제하는 검사들은 전부 통과했다.
+    """
+    from app.request_log import configure_logging, logger
+
+    configure_logging()
+    assert logger.isEnabledFor(logging.INFO), "INFO 레코드가 만들어지지도 않는다"
+    assert logger.handlers, "핸들러가 없어 어디에도 나가지 않는다"
+    # root로 전파하면 다른 포맷으로 중복 기록되거나 root 설정에 좌우된다.
+    assert logger.propagate is False
+
+
+def test_libraries_that_log_osrm_urls_are_kept_quiet():
+    """httpx는 INFO로 요청 URL을 통째로 찍는다 — 그 URL에 좌표가 들어 있다.
+
+    `/nearest/v1/foot/127.14020,36.47130`과 `/table/...`의 목적지 좌표가 그대로
+    로그에 남는다(v2.3 5절 위반). root 레벨을 올리는 순간 새므로 못박아 둔다.
+    """
+    from app.request_log import COORDINATE_LEAKING_LOGGERS, configure_logging
+
+    configure_logging()
+    root = logging.getLogger()
+    original = root.level
+    root.setLevel(logging.INFO)  # 누군가 root를 올린 상황
+    try:
+        for name in COORDINATE_LEAKING_LOGGERS:
+            assert not logging.getLogger(name).isEnabledFor(logging.INFO), name
+    finally:
+        root.setLevel(original)

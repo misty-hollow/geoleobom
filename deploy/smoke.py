@@ -96,6 +96,9 @@ def check_contract(body: dict[str, Any]) -> list[str]:
         if top3 is None:
             problems.append(f"{category}: top3는 null이 될 수 없다 (4-4)")
             continue
+        if status == "ok" and best is None:
+            # 4-4 표: ok는 "유효 후보 중 service_seconds 최소 1개"가 반드시 있다.
+            problems.append(f"{category}: ok인데 best가 null이다 (4-4)")
         if status in ("ok", "uncertain") and best is not None:
             if not top3:
                 problems.append(f"{category}: best가 있는데 top3가 비었다 (4-4)")
@@ -109,11 +112,20 @@ def check_contract(body: dict[str, Any]) -> list[str]:
             )
         for facility in filter(None, [best, *top3]):
             straight, walk = facility["straight_m"], facility["walk_m"]
-            expected = straight * 1.5 <= walk
-            if facility["detour_flag"] is not expected:
+            # 4-3 7단계는 `straight_m × 1.5 <= walk_m`이라고만 정하고, 판정에 쓰는 값이
+            # 표시용 정수인지 반올림 전 실수인지는 정하지 않았다. 응답에는 정수만 오므로
+            # **경계에서 1m 안쪽은 어느 쪽도 규약 위반이 아니다.** 규약이 정하지 않은
+            # 정밀도를 여기서 만들지 않도록, 그 폭을 넘어선 불일치만 보고한다.
+            margin = 1.5
+            if facility["detour_flag"] and walk < straight * 1.5 - margin:
                 problems.append(
-                    f"{category}: detour_flag가 규칙과 다르다 "
-                    f"(straight={straight} walk={walk} flag={facility['detour_flag']}) (4-3 7단계)"
+                    f"{category}: detour_flag가 켜졌는데 우회가 아니다 "
+                    f"(straight={straight} walk={walk}) (4-3 7단계)"
+                )
+            if not facility["detour_flag"] and walk > straight * 1.5 + margin:
+                problems.append(
+                    f"{category}: 우회인데 detour_flag가 꺼져 있다 "
+                    f"(straight={straight} walk={walk}) (4-3 7단계)"
                 )
 
     density = body["density"]
@@ -180,7 +192,11 @@ def main(argv: list[str] | None = None) -> int:
         help="smoke_coords.json의 density_profile 설계대로 동작했는지 확인 (합성 배포본 전용)",
     )
     parser.add_argument(
-        "--repeat", type=int, default=1, help="좌표당 반복 횟수(캐시 히트 확인)"
+        "--repeat",
+        type=int,
+        default=1,
+        help="좌표당 반복 횟수. 2 이상이면 캐시 히트를 확인한다 "
+        "(4-4: 캐시 히트는 computed_at을 새 요청 시각으로 바꾸지 않는다)",
     )
     args = parser.parse_args(argv)
 
@@ -196,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         spot = coord["id"]
         timings: list[float] = []
         body: dict[str, Any] = {}
+        computed_at_seen: list[str] = []
         for _ in range(max(1, args.repeat)):
             try:
                 body, elapsed_ms = fetch(
@@ -212,16 +229,29 @@ def main(argv: list[str] | None = None) -> int:
                 failures.append(f"{spot}: 요청 실패 {exc}")
                 break
             timings.append(elapsed_ms)
+            computed_at_seen.append(body.get("computed_at", ""))
         if not timings:
             continue
 
         problems = check_contract(body)
         failures.extend(f"{spot}: {problem}" for problem in problems)
 
+        if len(computed_at_seen) > 1 and len(set(computed_at_seen)) != 1:
+            # 4-4: 캐시 히트는 원 계산 결과의 computed_at을 그대로 돌려준다. 값이
+            # 달라졌다면 캐시가 안 먹었거나 히트에서 시각을 갈아끼운 것이다.
+            failures.append(
+                f"{spot}: 같은 좌표를 {len(computed_at_seen)}번 불렀는데 computed_at이 "
+                f"달라졌다 {sorted(set(computed_at_seen))} (4-4)"
+            )
+
         if args.expect_profile:
             wanted = coord["density_profile"]
             status = body["density"]["status"]
             checked = body["density"]["candidates_checked"]
+            # 이 검사는 규약 불변식이 아니라 **합성 배포본 배치가 의도한 경계를
+            # 만들었는지**를 본다. 실패하면 구현 결함이기 전에 픽스처 배치 문제일 수
+            # 있다. 실제 보행망의 스냅 거리·우회가 직선 반경을 그대로 두지 않는다.
+            hint = " — 구현 결함이 아니라 합성 POI 배치 문제일 수 있다(스냅·우회)"
             if wanted == "capped" and status != "capped":
                 failures.append(
                     f"{spot}: capped를 설계했는데 {status} (배치 설계 확인)"
@@ -230,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
                 # 첫 배치 60을 넘겨 확인했어야 추가 배치를 실제로 부른 것이다.
                 if checked <= 60:
                     failures.append(
-                        f"{spot}: 추가 배치를 설계했는데 확인한 후보가 {checked}개뿐이다"
+                        f"{spot}: 추가 배치를 설계했는데 확인한 후보가 {checked}개뿐이다{hint}"
                     )
                 if status == "capped":
                     failures.append(
