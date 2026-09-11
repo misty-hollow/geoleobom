@@ -31,6 +31,14 @@ MAX_TABLE_DESTINATIONS: Final[int] = 160  # FastAPI 가드
 OSRM_MAX_TABLE_SIZE: Final[int] = 200
 SNAP_WARNING_M: Final[int] = 100
 
+# 4-1 OSRM 버전 고정: PC 전처리 이미지 태그 = 서버 이미지 태그.
+# data/osrm/versions.json·deploy/compose.yaml과 같아야 하며 테스트가 그 일치를 검사한다.
+OSRM_IMAGE: Final[str] = "ghcr.io/project-osrm/osrm-backend"
+OSRM_IMAGE_TAG: Final[str] = "v5.27.1"
+OSRM_IMAGE_DIGEST: Final[str] = (
+    "sha256:855614a38f464b0558a2ad6eaa7cb8c139f39887da9b38b485ce453c6e6e6124"
+)
+
 # 4-4 상태·항목·에러 코드
 NearestCategory = Literal["convenience", "grocery", "pharmacy", "medical", "park"]
 DensityCategory = Literal["food_cafe"]

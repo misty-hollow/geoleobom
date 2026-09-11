@@ -1,0 +1,164 @@
+"""OSRM adapter (v2.3 4-3 3·5·6단계).
+
+httpx MockTransport로 요청 형태와 실패 매핑을 고정한다. 실제 OSRM 검사는
+`real_osrm` 마커가 붙은 test_real_osrm.py에 따로 있고 CI에서 제외된다.
+"""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from app.adapters.osrm import OsrmClient
+from app.analysis.errors import OsrmUnavailable, UpstreamTimeout
+from app.analysis.models import Candidate, Snap
+
+ORIGIN = Snap(lon=127.14020, lat=36.47130, snap_distance_m=3.0)
+
+
+def _candidates(count: int) -> list[Candidate]:
+    return [
+        Candidate(fid=i, name=f"POI {i}", category="convenience", straight_m=100.0 + i)
+        for i in range(1, count + 1)
+    ]
+
+
+def _coords(count: int) -> list[tuple[float, float]]:
+    return [(127.14 + i / 10000, 36.47 + i / 10000) for i in range(1, count + 1)]
+
+
+def _client(handler) -> OsrmClient:
+    transport = httpx.MockTransport(handler)
+    return OsrmClient("http://osrm.test", client=httpx.Client(transport=transport))
+
+
+def test_table_request_follows_the_contract():
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["query"] = str(request.url.query, "utf-8")
+        return httpx.Response(
+            200,
+            json={
+                "code": "Ok",
+                "durations": [[360.0, 450.0, 540.0]],
+                "distances": [[480.0, 600.0, 700.0]],
+                "destinations": [{"distance": 4.0}, {"distance": 9.0}, {"distance": 150.0}],
+            },
+        )
+
+    results = _client(handler).table(ORIGIN, _candidates(3), _coords(3))
+
+    assert "sources=0" in seen["query"]
+    assert "destinations=1%3B2%3B3" in seen["query"] or "destinations=1;2;3" in seen["query"]
+    assert "annotations=duration%2Cdistance" in seen["query"] or (
+        "annotations=duration,distance" in seen["query"]
+    )
+    # v2.3 4-3 5단계: fallback_speed 사용 금지.
+    assert "fallback_speed" not in seen["query"]
+    # coordinates = [출발지] + 목적지
+    assert seen["path"].startswith("/table/v1/foot/127.1402,36.4713;")
+    assert seen["path"].count(";") == 3
+
+    assert set(results) == {1, 2, 3}
+    assert results[1].duration_seconds == 360.0
+    assert results[1].distance_m == 480.0
+    # destinations[].distance가 목적지 스냅 거리다.
+    assert results[3].snap_distance_m == 150.0
+
+
+def test_table_keeps_null_durations_as_unreachable():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "code": "Ok",
+                "durations": [[None, 450.0]],
+                "distances": [[None, 600.0]],
+                "destinations": [{"distance": 4.0}, {"distance": 9.0}],
+            },
+        )
+
+    results = _client(handler).table(ORIGIN, _candidates(2), _coords(2))
+    assert results[1].duration_seconds is None
+    assert results[2].duration_seconds == 450.0
+
+
+def test_table_rejects_more_than_the_guard_allows():
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - 호출되면 안 됨
+        raise AssertionError("가드를 넘긴 요청이 나가면 안 된다")
+
+    with pytest.raises(ValueError, match="목적지"):
+        _client(handler).table(ORIGIN, _candidates(161), _coords(161))
+
+
+def test_empty_destinations_does_not_call_osrm():
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("목적지가 없으면 부르지 않는다")
+
+    assert _client(handler).table(ORIGIN, [], []) == {}
+
+
+def test_nearest_returns_snap_with_distance():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/nearest/v1/foot/127.1402,36.4713"
+        return httpx.Response(
+            200,
+            json={"code": "Ok", "waypoints": [{"location": [127.1404, 36.4711], "distance": 38.8}]},
+        )
+
+    snap = _client(handler).nearest(127.14020, 36.47130)
+    assert snap is not None
+    assert (snap.lon, snap.lat) == (127.1404, 36.4711)
+    assert snap.snap_distance_m == pytest.approx(38.8)
+
+
+def test_nearest_without_waypoints_is_none():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": "Ok", "waypoints": []})
+
+    assert _client(handler).nearest(127.14020, 36.47130) is None
+
+
+def test_timeout_maps_to_upstream_timeout():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("too slow", request=request)
+
+    with pytest.raises(UpstreamTimeout):
+        _client(handler).nearest(127.14020, 36.47130)
+
+
+@pytest.mark.parametrize(
+    "handler_result",
+    [
+        httpx.Response(500, json={"code": "Error"}),
+        httpx.Response(200, json={"code": "NoSegment"}),
+        httpx.Response(200, text="not json"),
+    ],
+)
+def test_osrm_failures_map_to_osrm_unavailable(handler_result: httpx.Response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return handler_result
+
+    with pytest.raises(OsrmUnavailable):
+        _client(handler).nearest(127.14020, 36.47130)
+
+
+def test_connection_error_maps_to_osrm_unavailable():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    with pytest.raises(OsrmUnavailable):
+        _client(handler).nearest(127.14020, 36.47130)
+
+
+def test_row_length_mismatch_is_treated_as_an_osrm_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"code": "Ok", "durations": [[360.0]], "distances": [[480.0]], "destinations": []},
+        )
+
+    with pytest.raises(OsrmUnavailable, match="durations 길이"):
+        _client(handler).table(ORIGIN, _candidates(2), _coords(2))

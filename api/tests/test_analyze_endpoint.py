@@ -1,0 +1,236 @@
+"""`/api/analyze` endpoint (v2.3 4-3, 4-4).
+
+실제 GeoPackage 구조(합성)와 모의 OSRM으로 전체 경로를 확인한다. 실제 OSRM 검사는
+`real_osrm` 마커 쪽에 있고 CI에서 제외된다.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from app.adapters.osrm import OsrmClient
+from app.adapters.poi import PoiRepository
+from app.service import AnalysisService
+from app.settings import Settings
+
+CENTER_LON = 127.14020
+CENTER_LAT = 36.47130
+
+
+def _settings(gpkg: Path) -> Settings:
+    return Settings(
+        data_dir=gpkg.parent,
+        data_version="2026Q3-cc-01",
+        time_model_version="tm1",
+        poi_date="2026-07-01",
+        osrm_base_url="http://osrm.test",
+        osrm_timeout_s=4.0,
+        analysis_budget_s=5.0,
+    )
+
+
+def _osrm(handler) -> OsrmClient:
+    transport = httpx.MockTransport(handler)
+    return OsrmClient("http://osrm.test", client=httpx.Client(transport=transport))
+
+
+def _reachable_handler(duration: float = 360.0, snap: float = 4.0):
+    """모든 목적지를 같은 duration으로 돌려주는 모의 OSRM."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/nearest"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "Ok",
+                    "waypoints": [{"location": [CENTER_LON, CENTER_LAT], "distance": 3.0}],
+                },
+            )
+        count = request.url.path.rstrip("/").count(";")
+        return httpx.Response(
+            200,
+            json={
+                "code": "Ok",
+                "durations": [[duration] * count],
+                "distances": [[duration * 1.3] * count],
+                "destinations": [{"distance": snap}] * count,
+            },
+        )
+
+    return handler
+
+
+@contextmanager
+def _app_with(settings: Settings, service: AnalysisService | None) -> Iterator[TestClient]:
+    """모듈 전역을 잠시 바꾸고 반드시 되돌린다. 다른 테스트로 상태가 새지 않게 한다."""
+    from app import main
+
+    original_settings, original_service = main.settings, main._service  # noqa: SLF001
+    main.settings = settings
+    main._service = service  # noqa: SLF001
+    try:
+        yield TestClient(main.app, raise_server_exceptions=False)
+    finally:
+        main.settings, main._service = original_settings, original_service  # noqa: SLF001
+
+
+@contextmanager
+def _client(gpkg: Path, handler) -> Iterator[TestClient]:
+    settings = _settings(gpkg)
+    service = AnalysisService(settings, poi=PoiRepository(gpkg), osrm=_osrm(handler))
+    with _app_with(settings, service) as client:
+        yield client
+
+
+@pytest.fixture
+def client(synthetic_gpkg: Path) -> Iterator[TestClient]:
+    with _client(synthetic_gpkg, _reachable_handler()) as test_client:
+        yield test_client
+
+
+def test_analyze_returns_the_v23_shape(client: TestClient):
+    response = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT})
+    assert response.status_code == 200
+    body = response.json()
+
+    assert set(body) == {
+        "input",
+        "snapped",
+        "region",
+        "versions",
+        "warnings",
+        "nearest",
+        "density",
+        "computed_at",
+    }
+    assert body["versions"]["data_version"] == "2026Q3-cc-01"
+    assert body["region"]["supported"] is True
+    # 실측 검증 배지는 공주 실측 구역 폴리곤이 생기기 전까지 항상 False다.
+    assert body["region"]["verified_area"] is False
+    assert [n["category"] for n in body["nearest"]] == [
+        "convenience",
+        "grocery",
+        "pharmacy",
+        "medical",
+        "park",
+    ]
+    assert body["computed_at"].endswith("Z") or "+00:00" in body["computed_at"]
+
+
+def test_best_and_top3_are_always_present(client: TestClient):
+    body = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT}).json()
+    for item in body["nearest"]:
+        assert "best" in item and "top3" in item
+        assert item["top3"] is not None
+        if item["best"] is not None:
+            assert item["top3"][0] == item["best"]
+
+
+def test_density_count_is_present_and_consistent(client: TestClient):
+    density = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT}).json()[
+        "density"
+    ]
+    assert density["category"] == "food_cafe"
+    assert density["cap"] == 20
+    if density["status"] == "complete":
+        assert isinstance(density["count"], int)
+    elif density["status"] == "capped":
+        assert density["count"] == density["cap"]
+    else:
+        assert density["count"] is None
+
+
+def test_input_is_rounded_to_five_decimals_once(client: TestClient):
+    body = client.get("/api/analyze", params={"lon": 127.1402049, "lat": 36.4713049}).json()
+    assert body["input"] == {"lon": 127.1402, "lat": 36.47130}
+
+
+def test_out_of_region_returns_the_flat_error_body(client: TestClient):
+    response = client.get("/api/analyze", params={"lon": 126.97800, "lat": 37.56650})
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "OUT_OF_REGION",
+        "message": response.json()["message"],
+    }
+    assert set(response.json()) == {"code", "message"}
+
+
+def test_snap_failure_returns_snap_failed(synthetic_gpkg: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": "Ok", "waypoints": []})
+
+    with _client(synthetic_gpkg, handler) as client:
+        response = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT})
+    assert response.status_code == 400
+    assert response.json()["code"] == "SNAP_FAILED"
+
+
+def test_required_osrm_failure_returns_502(synthetic_gpkg: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"code": "Error"})
+
+    with _client(synthetic_gpkg, handler) as client:
+        response = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT})
+    assert response.status_code == 502
+    assert response.json()["code"] == "OSRM_ERROR"
+
+
+def test_required_osrm_timeout_returns_504(synthetic_gpkg: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow", request=request)
+
+    with _client(synthetic_gpkg, handler) as client:
+        response = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT})
+    assert response.status_code == 504
+    assert response.json()["code"] == "TIMEOUT"
+
+
+def test_far_snap_sets_the_warning(synthetic_gpkg: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/nearest"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "Ok",
+                    "waypoints": [{"location": [CENTER_LON, CENTER_LAT], "distance": 140.0}],
+                },
+            )
+        return _reachable_handler()(request)
+
+    with _client(synthetic_gpkg, handler) as client:
+        body = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT}).json()
+    assert body["warnings"] == ["snap_warning"]
+
+
+def test_query_validation_stays_a_fastapi_422(client: TestClient):
+    # v2.3 4-4: FastAPI 자체 422는 제품 오류 계약 밖이다. code/message로 바꾸지 않는다.
+    response = client.get("/api/analyze", params={"lon": "abc", "lat": CENTER_LAT})
+    assert response.status_code == 422
+    assert "code" not in response.json()
+
+
+def test_route_and_search_remain_out_of_scope(client: TestClient):
+    assert client.get("/api/route", params={"lon": 127.1, "lat": 36.4, "fid": 1}).status_code == 501
+    assert client.get("/api/search", params={"q": "공주대"}).status_code == 501
+
+
+def test_analyze_is_unavailable_without_data_or_osrm():
+    unconfigured = Settings(
+        data_dir=None,
+        data_version=None,
+        time_model_version="tm1",
+        poi_date=None,
+        osrm_base_url=None,
+        osrm_timeout_s=4.0,
+        analysis_budget_s=5.0,
+    )
+    with _app_with(unconfigured, None) as client:
+        response = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT})
+    # 가짜 데이터로 동작시키지 않는다.
+    assert response.status_code == 503

@@ -90,6 +90,24 @@ class PoiRepository:
         candidates.sort(key=lambda c: (c.straight_m, c.fid))
         return candidates if limit is None else candidates[:limit]
 
+    def coordinates_for(self, fids: Sequence[int]) -> list[tuple[int, float, float]]:
+        """`/table` 요청에 넣을 (fid, lon, lat) 목록. 후보 조회와 같은 좌표를 쓴다."""
+        if not fids:
+            return []
+        # sqlite 변수 상한(기본 999)을 넘지 않게 나눠 조회한다. 목적지 상한은 160이지만
+        # 반경 안 밀도 후보 전체가 들어올 수 있다.
+        out: list[tuple[int, float, float]] = []
+        chunk = 500
+        with self._connect() as conn:
+            for start in range(0, len(fids), chunk):
+                part = list(fids[start : start + chunk])
+                placeholders = ",".join("?" * len(part))
+                rows = conn.execute(
+                    f"SELECT fid, lon, lat FROM {TABLE} WHERE fid IN ({placeholders})", part
+                ).fetchall()
+                out.extend((row["fid"], row["lon"], row["lat"]) for row in rows)
+        return out
+
     def scan_all(self, category: str) -> list[tuple[int, float, float]]:
         """R*Tree를 거치지 않은 전수 목록. 대조 검사 전용이다."""
         with self._connect() as conn:

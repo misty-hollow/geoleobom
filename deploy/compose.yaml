@@ -1,9 +1,11 @@
-# 걸어봄 배포 구성 (Week 1 — HTTPS 빈 페이지)
-# 기준: v2.2 4-1(웹 서버 Caddy, 배포 Docker Compose), 5절(서버 구성)
+# 걸어봄 배포 구성
+# 기준: 현재 확정설계(v2.3) 4-1(웹 서버 Caddy, 배포 Docker Compose), 5절(서버 구성)
 #
-# 이번 단계는 caddy 하나만 띄운다.
-# Week 2에 api(FastAPI)와 osrm을 추가할 때, 두 서비스에는
-# v2.2 5절에 따라 ports: 매핑을 만들지 않는다. 외부 공개는 caddy만 담당한다.
+# 외부 공개는 caddy만 담당한다. api·osrm에는 v2.3 5절에 따라 ports: 매핑을 만들지
+# 않는다. Docker가 연 포트는 UFW만으로 막히지 않기 때문이다.
+#
+# osrm 태그는 data/osrm/versions.json과 같아야 한다(v2.3 4-1 "PC 전처리 이미지 태그 =
+# 서버 이미지 태그"). api/app/contract.py의 OSRM_IMAGE_* 상수가 그 일치를 검사한다.
 
 services:
   caddy:
@@ -19,6 +21,39 @@ services:
       - ./site:/srv/site:ro                   # 정적 파일 (읽기 전용)
       - caddy_data:/data                      # 인증서 보관 - 반드시 필요
       - caddy_config:/config                  # Caddy 내부 상태
+
+  osrm:
+    # PC 전처리와 같은 태그·다이제스트. data/osrm/versions.json이 기준이다.
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    container_name: geoleobom-osrm
+    restart: unless-stopped
+    # ports 매핑 없음 — 컨테이너 내부 네트워크로만 노출한다.
+    command:
+      - osrm-routed
+      - --algorithm
+      - mld
+      - --max-table-size
+      - "200"
+      - /data/current/osrm/chungcheong.osrm
+    volumes:
+      # 데이터 배포본은 버전 디렉터리로 올리고 current가 그것을 가리킨다(v2.3 5절).
+      - /srv/geoleobom/data:/data:ro
+
+  api:
+    # 이미지는 배포 파이프라인이 만든다. 서버에서 빌드하지 않는다(v2.3 4-1).
+    image: ${GEOLEOBOM_API_IMAGE:-geoleobom/api:local}
+    container_name: geoleobom-api
+    restart: unless-stopped
+    # ports 매핑 없음 — caddy만 /api/*를 프록시한다.
+    depends_on:
+      - osrm
+    environment:
+      GEOLEOBOM_OSRM_URL: http://osrm:5000
+      GEOLEOBOM_DATA_DIR: /data/current
+      GEOLEOBOM_DATA_VERSION: ${GEOLEOBOM_DATA_VERSION:?데이터 버전을 지정해라}
+      GEOLEOBOM_POI_DATE: ${GEOLEOBOM_POI_DATE:-unknown}
+    volumes:
+      - /srv/geoleobom/data:/data:ro
 
 volumes:
   caddy_data:
