@@ -20,6 +20,11 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# 지원 지역 폴리곤은 파이썬 파일이 아니라서 명시하지 않으면 이미지에 안 실린다.
+# 빠지면 /api/analyze가 기동 중 파일 없음으로 죽는다.
+[tool.setuptools.package-data]
+"app.region_data" = ["*.geojson"]
+
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",

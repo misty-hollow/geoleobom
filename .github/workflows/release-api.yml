@@ -70,6 +70,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # 빌드 성공은 기동 성공이 아니다. 실제로 겪었다 — httpx가 dev 의존성이라
+      # 이미지는 멀쩡히 빌드됐는데 컨테이너가 ModuleNotFoundError로 죽었다.
+      # 한 줄이면 그 종류를 여기서 잡는다.
+      - name: Check the image actually starts
+        run: |
+          docker run --rm --network none             ghcr.io/${{ github.repository_owner }}/geoleobom-api:${{ github.sha }}             python -c "import app.main; print('app.main imported')"
+
       - name: Record the published reference
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then

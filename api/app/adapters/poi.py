@@ -82,10 +82,19 @@ class PoiRepository:
     ) -> list[Candidate]:
         """반경 안 후보를 직선거리 오름차순으로 돌려준다. limit은 상위 N개 제한이다."""
         min_lon, min_lat, max_lon, max_lat = bbox_for(lon, lat, radius_m)
+        # **R*Tree를 먼저 훑게 강제한다.** 평범한 JOIN으로 쓰면 SQLite가
+        # `idx_poi_category`를 바깥 루프로 골라 그 카테고리의 모든 행마다 R*Tree를
+        # 찔러 본다. 실데이터에서 `food_cafe`가 96,197행이라 한 번 조회에 200ms가
+        # 걸렸다(합성 데이터 920행일 때는 드러나지 않았다).
+        #
+        #   JOIN      SEARCH p USING INDEX idx_poi_category / SCAN r VIRTUAL TABLE  -> 202ms
+        #   IN 서브쿼리  SCAN rtree VIRTUAL TABLE / SEARCH p USING INDEX             ->   6.7ms
+        #
+        # 서브쿼리가 R*Tree 결과(수천 건)를 먼저 만들고 그 fid만 본다.
         sql = (
-            f"SELECT p.fid, p.name, p.category, p.lon, p.lat "
-            f"FROM {RTREE_TABLE} r JOIN {TABLE} p ON p.fid = r.id "
-            "WHERE r.maxx >= ? AND r.minx <= ? AND r.maxy >= ? AND r.miny <= ? "
+            f"SELECT p.fid, p.name, p.category, p.lon, p.lat FROM {TABLE} p "
+            f"WHERE p.fid IN (SELECT id FROM {RTREE_TABLE} "
+            "  WHERE maxx >= ? AND minx <= ? AND maxy >= ? AND miny <= ?) "
             "AND p.category = ?"
         )
         params = (min_lon, max_lon, min_lat, max_lat, category)

@@ -15,6 +15,8 @@ dependencies = [
     "pyproj==3.7.2",
     "pandas==2.3.3",
     "numpy==2.3.4",
+    # HIRA 병원·약국 원본이 xlsx다. PC 전용이며 api 런타임에는 들어가지 않는다.
+    "openpyxl==3.1.5",
 ]
 
 # data/ 안에 osrm/·fixtures/ 디렉터리가 있어 setuptools의 flat-layout 자동 탐색이
