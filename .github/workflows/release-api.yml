@@ -7,13 +7,18 @@
 # 서버에 레지스트리 토큰을 두지 않는다. Actions는 내장 GITHUB_TOKEN만 쓰고
 # 새 시크릿을 만들지 않는다.
 #
-# workflow_dispatch를 둔 이유: 병합 전에 실제 배포 경로(pull → 기동 → 스모크)를
-# 확인하려면 그 커밋의 이미지가 레지스트리에 있어야 한다. 태그는 언제나 커밋 SHA라
-# 작업 브랜치에서 게재해도 main의 이미지를 덮어쓰지 않는다.
+# **PR에서는 빌드만 하고 게재하지 않는다.** 게재는 main과 수동 실행에서만 한다.
+# 이유는 두 가지다.
+#   1. AGENTS.md 5절: 배포는 "main의 검사된 커밋"에서 한다. 작업 브랜치 이미지를
+#      운영에 올리는 경로를 만들지 않는다.
+#   2. 그래도 Dockerfile이 깨진 채 병합되면 병합 직후 게재가 실패한다. 그래서
+#      PR에서 **빌드 가능 여부는 반드시 확인**한다.
 
 name: Release API image
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -27,7 +32,7 @@ concurrency:
 
 jobs:
   publish:
-    name: publish-api-image
+    name: api-image
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -39,6 +44,7 @@ jobs:
           persist-credentials: false
 
       - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
           registry: ghcr.io
@@ -57,7 +63,8 @@ jobs:
           context: api
           file: api/Dockerfile
           platforms: linux/amd64
-          push: true
+          # PR에서는 false — 빌드만 확인한다.
+          push: ${{ github.event_name != 'pull_request' }}
           provenance: false
           tags: ghcr.io/${{ github.repository_owner }}/geoleobom-api:${{ github.sha }}
           cache-from: type=gha
@@ -65,6 +72,14 @@ jobs:
 
       - name: Record the published reference
         run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            {
+              echo '### API image'
+              echo 'Built successfully. Not published: pull requests do not publish.'
+              echo 'Publication happens on merge to main (AGENTS.md 5: deploy from a checked commit on main).'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           IMAGE="ghcr.io/${{ github.repository_owner }}/geoleobom-api"
           DIGEST="${{ steps.build.outputs.digest }}"
           {
