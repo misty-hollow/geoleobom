@@ -17,6 +17,11 @@ dependencies = [
     "numpy==2.3.4",
 ]
 
+# data/ 안에 osrm/·fixtures/ 디렉터리가 있어 setuptools의 flat-layout 자동 탐색이
+# 세 개를 모두 패키지로 본다. 실제 파이썬 패키지는 data 하나뿐이므로 명시한다.
+[tool.setuptools]
+packages = ["data"]
+
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",

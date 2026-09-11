@@ -36,9 +36,7 @@ def ring(count: int, radius_m: float) -> list[tuple[float, float]]:
         # 반경을 조금씩 바꿔 같은 도로에 전부 붙지 않게 한다.
         r = radius_m * (0.35 + 0.65 * ((i % 7) + 1) / 7)
         dlat = (r * math.sin(angle)) / METERS_PER_DEG_LAT
-        dlon = (r * math.cos(angle)) / (
-            METERS_PER_DEG_LAT * math.cos(math.radians(ORIGIN_LAT))
-        )
+        dlon = (r * math.cos(angle)) / (METERS_PER_DEG_LAT * math.cos(math.radians(ORIGIN_LAT)))
         points.append((round(ORIGIN_LON + dlon, 6), round(ORIGIN_LAT + dlat, 6)))
     return points
 

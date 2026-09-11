@@ -50,7 +50,9 @@ services:
     environment:
       GEOLEOBOM_OSRM_URL: http://osrm:5000
       GEOLEOBOM_DATA_DIR: /data/current
-      GEOLEOBOM_DATA_VERSION: ${GEOLEOBOM_DATA_VERSION:?데이터 버전을 지정해라}
+      # 비어 있으면 api가 분석을 켜지 않고 503을 돌려준다. 잘못된 버전을 추측해
+      # 엉뚱한 데이터로 답하는 것보다 낫다. 배포 스크립트가 값을 넣는다.
+      GEOLEOBOM_DATA_VERSION: ${GEOLEOBOM_DATA_VERSION:-}
       GEOLEOBOM_POI_DATE: ${GEOLEOBOM_POI_DATE:-unknown}
     volumes:
       - /srv/geoleobom/data:/data:ro
