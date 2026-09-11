@@ -63,9 +63,24 @@ def caddyfile() -> str:
     return CADDYFILE.read_text(encoding="utf-8")
 
 
+def _strip_trailing_comment(line: str) -> str:
+    """줄 끝 주석을 뗀다.
+
+    Caddyfile은 공백 뒤 `#`부터를 주석으로 버린다. 이것을 떼지 않으면
+    `log { # 메모` 같은 줄이 `{`로 끝나지 않아 **블록 열거에서 빠진다.**
+    그런 로거는 정제 없이 좌표를 기록한다.
+    """
+    head = line.split(" #", 1)[0].split("\t#", 1)[0]
+    return head.rstrip()
+
+
 def _code_lines(text: str) -> list[str]:
-    """주석과 빈 줄을 뺀 줄 목록(들여쓰기는 유지)."""
-    return [line for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    """주석과 빈 줄을 뺀 줄 목록(들여쓰기는 유지, 줄 끝 주석 제거)."""
+    return [
+        stripped
+        for stripped in (_strip_trailing_comment(line) for line in text.splitlines())
+        if stripped.strip() and not stripped.strip().startswith("#")
+    ]
 
 
 def _block_body(text: str, opener: str) -> str:
@@ -113,9 +128,10 @@ def _log_blocks(caddyfile: str) -> list[tuple[str, str]]:
     blocks: list[tuple[str, str]] = []
     offset = 0
     for line in caddyfile.splitlines(keepends=True):
-        stripped = line.strip()
+        # 줄 끝 주석을 떼고 본다. `log { # 메모`도 블록이다.
+        stripped = _strip_trailing_comment(line).strip()
         tokens = stripped.split()
-        if tokens and tokens[0] == "log" and stripped.endswith("{"):
+        if tokens and tokens[0].strip('"') == "log" and stripped.endswith("{"):
             opener = caddyfile[offset : offset + len(line)].rstrip("\r\n")
             blocks.append(
                 (stripped, _block_body(caddyfile[offset:], opener[opener.index("log") :]))
