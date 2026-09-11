@@ -81,7 +81,8 @@ class RouteResponse(BaseModel):
     walk_m: int
     snapped_origin: Snapped
     snapped_dest: Snapped
-    slope_ref_seconds: int | None = None
+    # v2.2 4-4·4-3 10단계: slope_ref_seconds는 경사 참고값을 "채택 시에만" 붙는 필드다.
+    # Week 10 확인 실측 후 채택 판정이 나면 그때 별도 변경으로 추가한다.
 
 
 class SearchResult(BaseModel):

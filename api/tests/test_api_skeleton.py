@@ -50,12 +50,12 @@ def test_openapi_has_v22_analyze_fields():
         "candidates_checked",
         "candidates_total",
     }
+    # slope_ref_seconds는 경사 참고값 채택(Week 10) 전까지 계약에 없다 — v2.2 4-4.
     assert set(schema["RouteResponse"]["properties"]) == {
         "geometry",
         "walk_seconds",
         "walk_m",
         "snapped_origin",
         "snapped_dest",
-        "slope_ref_seconds",
     }
     assert set(schema["SearchResult"]["properties"]) == {"name", "address", "lon", "lat"}
