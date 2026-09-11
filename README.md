@@ -21,9 +21,12 @@ api/           FastAPI — /api/health·/api/analyze 동작, 4-4 응답 모델·
 web/           React 18 + TypeScript + Vite 골격 — /api/health 표시
 data/          원본 3종 ingest 파이프라인, POI GeoPackage 생성·검증(PC 전용 GIS
                의존성), 지원 폴리곤 생성, 게이트 2 품질 측정, OSRM 그래프 빌드
+data/region_data/  POI 수집 폴리곤 (지원 경계 + 3km, v2.3 1-3). 지원 판정 폴리곤은
+                   api/app/region_data/ 에 있고 서버 이미지에 실린다
 docs/          확정설계 v2.3(현재)·v2.2·v2.1(이력) + 개발운영가이드 v1
-deploy/        배포 파일 (compose.yaml: caddy·osrm·api, Caddyfile, site/index.html)
-.github/       CI(repository-baseline·api-checks·data-checks·web-build)·PR 양식·보호 설정
+deploy/        배포 파일 (compose.yaml: caddy·osrm·api, Caddyfile, site/index.html,
+               deploy_api.sh·deploy_data.sh·rollback.sh·smoke.py·loadtest.py)
+.github/       CI(repository-baseline·api-checks·data-checks·web-build) + api-image·PR 양식·보호 설정
 PROJECT.md     안내 + 승인된 결정
 AGENTS.md      AI 공통 작업 규칙
 CLAUDE.md      AGENTS.md 연결
@@ -64,19 +67,26 @@ cd web && npm ci
 ## 실행 (2026-09-11 실제 실행해 확인)
 
 ```
-api/.venv/Scripts/python.exe -m uvicorn app.main:app --app-dir api --reload   # http://127.0.0.1:8000/api/health
-cd web && npm run dev                                                           # /api 는 8000으로 프록시
+api/.venv/Scripts/python.exe -m uvicorn app.main:app --app-dir api --reload --no-access-log   # http://127.0.0.1:8000/api/health
+cd web && npm run dev                                                                          # /api 는 8000으로 프록시
 ```
+
+**`--no-access-log`는 선택이 아니다** (v2.3 5절). uvicorn 기본 접근 로그는
+`"GET /api/analyze?lon=127.14020&lat=36.47130 HTTP/1.1"`처럼 **좌표가 든 원본 요청
+줄을 그대로** 남긴다. 대신 `app/request_log.py`의 미들웨어가 5절이 허용한 항목만
+쓴다(요청 식별자·경로 템플릿·상태코드·응답시간·캐시 히트/미스·목적지 수·배치 수).
+운영 이미지는 `api/Dockerfile`이 같은 플래그를 붙이며, 로컬 실행도 같아야 한다 —
+개발 PC 로그에도 남길 이유가 없다.
 
 `/api/analyze`는 **GeoPackage 배포본과 OSRM이 둘 다 설정돼야** 켜진다. 설정이 없으면 가짜 값을 만들지 않고 **503**을 돌려준다. `/api/route`·`/api/search`는 아직 범위 밖이라 **501**이다.
 
 ### 데이터와 OSRM까지 띄워서 실행 (2026-09-11 실제 실행해 확인)
 
 ```
-# 1) 합성 POI로 GeoPackage 만들기 (실데이터가 오면 같은 스크립트에 CSV만 바꾼다)
+# 1) 합성 POI로 GeoPackage 만들기 (실데이터는 data/README.md의 ingest 절차를 쓴다)
 cd data && .venv/Scripts/python.exe -m data.make_fixture --out fixtures/poi_synthetic.csv
-.venv/Scripts/python.exe -m data.build_gpkg --csv fixtures/poi_synthetic.csv --out build/2026Q3-cc-01/poi.gpkg
-.venv/Scripts/python.exe -m data.validate_gpkg build/2026Q3-cc-01/poi.gpkg
+.venv/Scripts/python.exe -m data.build_gpkg --csv fixtures/poi_synthetic.csv --out build/local-dev/poi.gpkg
+.venv/Scripts/python.exe -m data.validate_gpkg build/local-dev/poi.gpkg
 
 # 2) 충청권 OSRM foot 그래프 (pbf 내려받기 포함. 약 10분, 디스크 약 5GB)
 bash data/osrm/build_graph.sh
@@ -85,8 +95,12 @@ bash data/osrm/build_graph.sh
 bash data/osrm/run_osrm.sh
 
 # 4) API 기동
-GEOLEOBOM_DATA_DIR=<절대경로>/data/build/2026Q3-cc-01 GEOLEOBOM_DATA_VERSION=2026Q3-cc-01 GEOLEOBOM_POI_DATE=2026-07-01 GEOLEOBOM_OSRM_URL=http://127.0.0.1:5000 api/.venv/Scripts/python.exe -m uvicorn app.main:app --app-dir api
+GEOLEOBOM_DATA_DIR=<절대경로>/data/build/local-dev GEOLEOBOM_DATA_VERSION=local-dev GEOLEOBOM_POI_DATE=synthetic GEOLEOBOM_OSRM_URL=http://127.0.0.1:5000 api/.venv/Scripts/python.exe -m uvicorn app.main:app --app-dir api --no-access-log
 ```
+
+**로컬 예시에 운영 `data_version`을 쓰지 않는다.** `2026Q3-cc-0*`은 서버에 올라간
+불변 배포본의 이름이고, 로컬 합성 데이터에 같은 이름을 붙이면 응답의 `versions`와
+캐시 키가 운영과 같아져 어느 데이터로 나온 결과인지 구분되지 않는다.
 
 확인된 응답: `/api/analyze?lon=127.14020&lat=36.47130` → 200, 최근접 5항목 `ok`, 밀도 `complete`.
 지원 지역 밖(`lon=126.97800&lat=37.56650`) → 400 `{"code":"OUT_OF_REGION", ...}`.
@@ -115,7 +129,9 @@ CI(`.github/workflows/ci.yml`)는 네 작업이다.
 - `data-checks` — ruff + pytest. 작은 합성 픽스처만 쓴다. 실데이터·OSRM 빌드는 돌리지 않는다
 - `web-build` — `tsc -b` + `vite build`
 
-`repository-baseline`·`api-checks`·`web-build` 셋은 **`main` 병합 필수 검사다**(2026-09-11 보호 규칙, `strict=true`). `data-checks`는 이번에 추가돼 아직 필수가 아니며, 필수로 올리려면 보호 규칙을 한 번 고쳐야 한다. 이 검사들은 모두 합성·모의 데이터만 쓰므로 실제 OSRM·실데이터·성능·운영 배포를 검증하지 않는다.
+별도 워크플로 `release-api.yml`의 `api-image`가 Dockerfile 빌드와 컨테이너 기동을 확인한다(PR에서는 게재하지 않는다).
+
+`repository-baseline`·`api-checks`·`web-build` 셋은 **`main` 병합 필수 검사다**(2026-09-11 보호 규칙, `strict=true`). **`data-checks`와 `api-image`는 CI에서 돌지만 아직 필수 검사가 아니다** — 필수로 올리려면 보호 규칙을 한 번 고쳐야 하고, 그것은 사용자 승인이 필요한 설정 변경이다. 이 검사들은 모두 합성·모의 데이터만 쓰므로 실제 OSRM·실데이터·성능·운영 배포를 검증하지 않는다.
 
 자동 병합 초기 설정과 미완료 조건은 [최초 검증 안내](docs/automation-bootstrap.md)에 있다. CI 성공과 GitHub 보호 설정·독립 검토 완료를 구분한다.
 
@@ -146,17 +162,33 @@ API 이미지는 **`main` 병합 때 GitHub Actions가 GHCR에 올린다.** 태�
 배포는 **코드와 데이터를 분리해서** 한다(AGENTS.md 5절).
 
 ```
-bash deploy/deploy_data.sh --version <data_version> --poi-date <기준일> --upload <로컬 버전 디렉터리>
+# 데이터: 새 data_version에만 올린다. 기존 버전에 덮어쓰려 하면 스크립트가 거부한다.
+bash deploy/deploy_data.sh --version <새 data_version> --poi-date <기준일> --upload <로컬 버전 디렉터리>
+# 보행망이 그대로면 그래프를 서버 안에서 복사한다(881MB 재업로드 없음)
+bash deploy/deploy_data.sh --version <새 data_version> --poi-date <기준일> \
+    --upload <로컬 버전 디렉터리> --osrm-from <직전 data_version>
+
+# 코드: deploy_api.sh가 끝에서 스모크까지 돌린다
 bash deploy/deploy_api.sh <main의 커밋 SHA 40자>
+
+# 데이터만 바꿨을 때는 스모크를 직접 돌린다
 python deploy/smoke.py --base-url https://geoleobom.kr --baseline deploy/smoke_baseline/<data_version>.json
 ```
 
-- `deploy_data.sh`는 v2.3 5절의 교체 절차를 그대로 따른다. 업로드 → `api`·`osrm` 정지 → `current` 참조 변경 → 컨테이너 재생성 → 직전 버전 보존. **실행 중 파일 덮어쓰기와 단순 `restart`로 끝내지 않는다.** 기준일은 버전 디렉터리의 `poi_date.txt`에 함께 남아 롤백이 데이터와 기준일을 짝지어 되돌린다.
-- `deploy_api.sh`는 태그만 믿지 않는다. 레지스트리에서 **digest를 조회해 태그 + digest로 고정**하고, 기동 뒤 실제로 그 이미지가 돌고 있는지 컨테이너에서 대조한다.
-- 롤백은 `bash deploy/rollback.sh code` 또는 `... data`다. 데이터 롤백은 **아무것도 지우지 않고** `current`/`previous` 링크만 맞바꾼다. 사전 조건(직전 버전의 데이터·기준일 존재, `previous != current`)을 **서비스를 정지하기 전에** 모두 확인하므로, 되돌릴 수 없는 상황이면 아무것도 건드리지 않고 멈춘다.
+- **`data_version`은 불변이다.** 이미 서버에 있는 버전 디렉터리에는 쓰지 않는다. `data_version`은 캐시 키(v2.3 4-3)와 응답 `versions`에 들어가므로, 같은 이름으로 내용을 바꾸면 옛 캐시 결과가 새 데이터인 척 남고 롤백해도 그 버전이 무엇이었는지 알 수 없다. 데이터를 고쳤으면 **새 `data_version`을 만든다.** 위 예시의 `<새 data_version>`을 실제 이름으로 바꿔 쓰고, 이미 올라간 이름을 재사용하지 않는다.
+- 업로드는 `.staging/<버전>`에 받아 검증한 뒤 **원자적으로 옮긴다.** 중간에 끊겨도 반쯤 찬 디렉터리가 `current`가 되지 않는다. 버전 디렉터리에는 `MANIFEST`(poi.gpkg sha256·크기, OSRM 파일 수·크기·`fileIndex` sha256, `poi_date`)가 함께 들어가고, 참조 변경과 롤백에서 **셋이 같은 묶음인지** 대조한다.
+  - **MANIFEST 도입 전에 올라간 버전(`synthetic-cc-01`·`2026Q3-cc-01`·`2026Q3-cc-02`)에는 그 파일이 없고, 그 버전을 다룰 때는 대조를 건너뛴다.** 스크립트가 그렇다고 말한다. **지금 만들어 채우지 않는다** — 그러면 "올릴 때의 상태"가 아니라 "지금 상태"를 정답으로 굳혀, 이미 손댄 파일이라도 검증을 통과시키는 없는 보장이 된다.
+- `deploy_data.sh`는 v2.3 5절의 교체 절차를 그대로 따른다. 업로드 → `api`·`osrm` 정지 → `current` 참조 변경 → 컨테이너 재생성 → **응답 대기** → 직전 버전 보존. **실행 중 파일 덮어쓰기와 단순 `restart`로 끝내지 않는다.** 정지가 실패하면 참조를 바꾸지 않고 멈춘다.
+- **`docker compose up -d` 성공은 기동 성공이 아니다.** 세 스크립트 모두 제한시간을 두고 `/api/health`가 답할 때까지 기다린 뒤 다음 단계로 간다. 데이터 교체는 응답이 오는 것만으로 부족해 **바뀐 `data_version`으로 답하는지**까지 확인한다. 컨테이너가 죽으면 제한시간 끝까지 기다리지 않고 로그를 찍고 실패한다.
+- `deploy_api.sh`는 태그만 믿지 않는다. 레지스트리에서 **digest를 조회해 태그 + digest로 고정**하고, 기동 뒤 실제로 그 이미지가 돌고 있는지 컨테이너에서 대조한다. 설정(`compose.yaml`·`Caddyfile`·`site/`)도 작업 트리가 아니라 **배포하는 커밋의 것**을 올린다.
+- **정상 복구 지점은 스모크 통과 뒤에만 움직인다.** `deploy_api.sh`가 마지막에 스모크를 돌리고, 통과해야 `.env.last-good`을 갱신한다. 실패하면 갱신하지 않고 롤백 명령을 알려 준다. `--skip-smoke`를 주면 갱신하지 않는다고 말한다.
+- 롤백은 `bash deploy/rollback.sh code` 또는 `... data`다.
+  - `code`는 `.env.last-good`의 이미지와 **그 배포의 커밋 SHA**를 함께 읽어, 그 커밋의 `deploy/`를 복원한 뒤 이미지를 되돌린다. **옛 이미지에 새 설정을 섞지 않는다** — 그 조합은 어디서도 검사된 적이 없다. 복원한 `compose.yaml`은 인자 없는 `up -d`로 **전체에 적용**한다(정의가 바뀐 서비스만 재생성되므로 필요 이상으로 끊지 않는다). Caddy는 바인드 마운트라 따로 reload한다.
+  - `data`는 **아무것도 지우지 않고** `current`/`previous` 링크만 맞바꾼다. 사전 조건(직전 버전의 poi.gpkg·OSRM 파일 세트·기준일·MANIFEST, `previous != current`)을 **서비스를 정지하기 전에** 모두 확인하므로, 되돌릴 수 없는 상황이면 아무것도 건드리지 않고 멈춘다.
 - 되돌린 뒤에는 반드시 `deploy/smoke.py`로 실제 응답을 확인한다. 스크립트가 성공했다는 것만으로 복구됐다고 하지 않는다.
 - **첫 배포에서는 데이터가 먼저다.** 아직 이미지가 없으면 `deploy_data.sh`가 `osrm`만 올리고 `api`는 건너뛴다. 이미지가 없는 채로 `api`를 올리려 하면 compose 기본 태그를 pull하다 실패하는데, 그러면 데이터 반영까지 같이 실패한 것처럼 보인다.
 - **`deploy_api.sh`는 caddy 컨테이너도 재생성한다.** compose의 caddy 이미지가 태그에서 태그 + digest로 바뀌었기 때문이다. 공개 페이지가 수 초 끊긴다. 인증서는 `geoleobom_caddy_data` 볼륨에 있어 보존된다.
+- **`deploy_api.sh`가 Caddy 설정을 다시 읽힌다.** `Caddyfile`은 바인드 마운트라 내용이 바뀌어도 compose가 컨테이너를 재생성하지 않는다. 복사만 하고 끝내면 새 설정이 적용되지 않는다(실제로 겪었다). `caddy reload`는 설정을 먼저 검증하고 실패하면 돌던 설정을 유지하므로 서비스가 끊기지 않는다.
 
 ### 게이트 2 측정 명령
 
@@ -194,6 +226,38 @@ poi_date 2022-11-21   지원 폴리곤 osm-2026-09-11
 **OSRM 추출 범위도 함께 넓혔다.** 이전 범위는 충북 단양(128.65E)과 충남 서해 도서(125.29E)를
 담지 못해 "지원한다고 답하는데 보행망이 없는" 구간이 생겼을 것이다. 넓힌 뒤 단양군청
 좌표가 보행망에 29m로 스냅되는 것을 확인했다.
+
+### `2026Q3-cc-03` — POI 수집 범위를 3km 여유까지 넓혔다
+
+v2.3 1-3: "데이터 추출 범위 = 서비스 경계 + **시설 검색 여유(3km)** + 경로 우회 여유".
+OSRM 추출 상자는 그 여유를 담고 있었는데 **POI만 지원 폴리곤으로 딱 잘라 넣었다.**
+그래서 경계 근처 좌표에서는 3km 반경 안에 실재하는 시설이 배포본에 없었다.
+
+```
+좌표 [127.22575, 36.92754]  지원 폴리곤 안(supported=true) · 경계까지 362m
+  경기 원본의 3km 안 대상 시설 11곳 중 10곳이 폴리곤 밖이라 ingest가 버렸다
+```
+
+`2026Q3-cc-02`와 `-03`을 같은 좌표에서 비교하면 결과가 실제로 달라진다.
+
+| 항목 | cc-02 최근접 | cc-03 최근접 | |
+|---|---|---|---|
+| convenience | 606 m | **116 m** | 5배 가까운 곳이 빠져 있었다 |
+| medical | 1,471 m | **1,070 m** | |
+| food_cafe (1km 내) | 2곳 | **7곳** | |
+
+배포본 전체로는 **더하기만 했다.**
+
+```
+123,963행 -> 133,310행 (+9,347)
+사라진 fid 0 · 내용 바뀐 fid 0 · 새 fid 9,347
+poi_date 2022-11-21 (그대로)   지원 폴리곤 osm-2026-09-11 (그대로)
+```
+
+기존 시설의 `fid`도 좌표도 움직이지 않았으므로 수정표와 캐시 의미가 유지된다.
+**지원 판정 폴리곤은 바꾸지 않았다** — 재생성 결과가 바이트 단위로 같다. 사용자에게
+보이는 경계와 `region.supported`는 그대로이고, 수집 범위만 따로 넓혔다.
+자세한 절차는 `data/README.md`의 "POI 수집 범위" 절에 있다.
 
 ### 실데이터가 드러낸 성능 결함 둘
 
@@ -259,7 +323,12 @@ deploy_data.sh    -> current: synthetic-cc-01 -> 2026Q3-cc-01
 10분 안에 7곳뿐이었고 최근접 시설이 모두 500m 밖이었다. 실데이터의 궁동 카페·음식점
 377곳 중심으로 옮겼다(1km 내 1,308곳).
 
-### 2026-09-11 실제 배포해 확인한 것
+### 과거 기록 — 첫 배포(합성 `synthetic-cc-01`) 실험
+
+> **지난 상태의 기록이다. 현재 운영 상태가 아니다.** 아래 값은 합성 배포본
+> `synthetic-cc-01`(920행)로 처음 배포했을 때의 것이고, 그 뒤 `2026Q3-cc-01` →
+> `2026Q3-cc-02`로 두 번 교체했다. 현재 운영 상태는 위의 실데이터 절을 본다.
+> 여기 남겨 두는 이유는 **배포·롤백 절차를 실제로 밟아 본 기록**이기 때문이다.
 
 **운영 서버에서 `/api/analyze`가 동작한다.** caddy·osrm·api 세 컨테이너가 떠 있고 위 명령을 모두 실제로 실행했다.
 
@@ -288,15 +357,19 @@ https://geoleobom.kr/            -> 200 (정적 페이지 유지)
 
 **단, 재적용 전에 기록된 오류 로그 5줄에는 쿼리 문자열이 그대로 남아 있다.** 첫 기동 때 Caddy가 옛 설정으로 돌던 구간이다. 그 좌표는 픽스처 좌표이고, 컨테이너를 재생성하면 로그와 함께 사라진다. **로그 규약을 고친 뒤에는 반드시 Caddy를 다시 읽히고, 그 전 로그가 남아 있다는 것을 염두에 둔다.**
 
-**`deploy_api.sh`는 Caddyfile을 복사하지만 Caddy를 다시 읽히지는 않는다.** Caddyfile은 바인드 마운트라 내용이 바뀌어도 컨테이너가 재생성되지 않는다. 이번에는 `docker exec geoleobom-caddy caddy reload --config /etc/caddy/Caddyfile`을 따로 실행했다. 스크립트에 넣는 것은 다음 작업이다.
+**그때는 `deploy_api.sh`가 Caddyfile을 복사만 하고 Caddy를 다시 읽히지 않았다.** Caddyfile은 바인드 마운트라 내용이 바뀌어도 컨테이너가 재생성되지 않는다. 그래서 `docker exec geoleobom-caddy caddy reload …`를 손으로 실행했다. **지금은 `deploy_api.sh`와 `rollback.sh`가 직접 재적용한다.**
 
-아직 확인하지 않은 것:
+그때 남아 있던 미확인 항목의 현재 상태:
 
-- **첫 배포본은 합성 데이터다.** `data_version`은 `synthetic-cc-01`, `poi_date`는 `synthetic`이라 응답의 `versions`만 봐도 실데이터가 아님이 드러난다. 실데이터가 오면 같은 교체 절차로 갈아끼운다. **여기서 잰 성능 값은 실데이터 분포가 아니라 설계한 후보 규모에서 나온 값이다.**
-- **데이터 교체 절차는 아직 한 번만 수행했다**(첫 배포). 직전 버전이 없어 `rollback.sh data`는 실행하지 못했다. 실데이터 교체 때 수행한다.
+- ~~첫 배포본은 합성 데이터다~~ → **해소.** 실데이터 배포본으로 두 번 교체했다(위 절).
+- ~~데이터 교체 절차를 한 번만 수행했다. `rollback.sh data`는 실행하지 못했다~~ → **해소.** 실데이터 교체와 데이터 롤백을 모두 수행했다(위 "데이터 롤백을 실제로 수행했다").
 - **보행망 데스크체크 80%, 실데이터 후보 품질**은 그대로 미측정이다(B 담당).
 
-### 게이트 2 성능·자원 측정 결과 (2026-09-11)
+### 과거 기록 — 합성 배포본에서 잰 게이트 2 성능·자원 (2026-09-11)
+
+> **지난 상태의 기록이다.** 합성 배포본 `synthetic-cc-01`(920행)에서 잰 값이며,
+> 실데이터(123,963행)로 다시 잰 현재 값은 위의 "실데이터가 드러낸 성능 결함 둘"
+> 표에 있다. 여기 값은 **설계한 후보 규모**에서 나온 것이지 실데이터 분포가 아니다.
 
 측정 위치는 **개발 PC(대한민국, 유선)**, 서버는 Los Angeles다. 서버 내부 처리 시간과 클라이언트 체감 시간을 구분해 적는다.
 
@@ -392,7 +465,10 @@ git ls-remote --heads origin
 
 ## 데이터 배포본 복구
 
-**미확인.** 확정설계 5절의 데이터 교체·롤백 절차와 개발 운영 가이드 7절이 기준이다. Week 8에 복구 실습을 수행한다.
+**서버 안 롤백은 확인했다. 백업에서의 복구는 미확인이다.** 둘을 구분한다.
+
+- **확인** — `rollback.sh data`로 `current`를 직전 버전으로 되돌리고 다시 앞으로 돌렸다(위 "데이터 롤백을 실제로 수행했다"). 서버에 직전 버전이 남아 있는 경우다.
+- **미확인** — 서버의 버전 디렉터리가 통째로 사라졌을 때 **개발 PC·클라우드 드라이브의 백업에서 복구**하는 것. 확정설계 5절의 백업 항목과 개발 운영 가이드 7절이 기준이며, Week 8에 실습한다.
 
 ---
 

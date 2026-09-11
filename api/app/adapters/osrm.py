@@ -10,6 +10,17 @@
 
 상류 실패는 제품 오류가 아니라 `UpstreamError` 계열로 올린다. 그것을 제품 오류로
 승격할지 밀도 incomplete로 끝낼지는 계산 core가 정한다(v2.3 4-4).
+
+## 예외 문구에 좌표를 넣지 않는다 (v2.3 5절)
+
+요청 path는 `/nearest/v1/foot/127.14020,36.47130`처럼 **좌표 그 자체**다. 예전에는
+그 path를 예외 문구에 그대로 넣었는데, 미처리 예외가 나면 uvicorn이 traceback을
+찍으면서 좌표가 로그에 남았다. 실제로 재현했다:
+
+    MemoryError: OSRM timeout: /nearest/v1/foot/127.1402,36.4713
+
+그래서 문구에는 **endpoint 템플릿과 개수만** 쓴다. 어느 요청이었는지는 접근 로그의
+요청 식별자로 잇는다.
 """
 
 from __future__ import annotations
@@ -18,11 +29,18 @@ from collections.abc import Sequence
 
 import httpx
 
-from app.analysis.errors import OsrmUnavailable, UpstreamTimeout
+from app.analysis.errors import OsrmRefused, OsrmUnavailable, UpstreamTimeout
 from app.analysis.models import Candidate, Snap, TableResult
 from app.contract import MAX_TABLE_DESTINATIONS
 
 DEFAULT_TIMEOUT_S = 4.0
+
+# 로그·예외 문구에 쓰는 endpoint 이름. 좌표가 붙은 실제 path를 쓰지 않는다(v2.3 5절).
+NEAREST_ENDPOINT = "/nearest/v1/foot"
+TABLE_ENDPOINT = "/table/v1/foot"
+
+# "붙일 보행망 구간을 찾지 못했다"는 OSRM 코드.
+NO_SEGMENT = "NoSegment"
 
 
 class OsrmClient:
@@ -42,30 +60,48 @@ class OsrmClient:
     def close(self) -> None:
         self._client.close()
 
-    def _get(self, path: str, params: dict[str, str]) -> dict:
+    def _get(self, path: str, params: dict[str, str], *, endpoint: str) -> dict:
+        """`path`에는 좌표가 들어 있다. 예외 문구에는 `endpoint`만 쓴다(v2.3 5절)."""
         try:
             response = self._client.get(f"{self._base_url}{path}", params=params)
         except httpx.TimeoutException as exc:
-            raise UpstreamTimeout(f"OSRM timeout: {path}") from exc
+            raise UpstreamTimeout(f"OSRM timeout: {endpoint}") from exc
         except httpx.HTTPError as exc:
-            raise OsrmUnavailable(f"OSRM 요청 실패: {path}") from exc
+            raise OsrmUnavailable(f"OSRM 요청 실패: {endpoint}") from exc
 
         if response.status_code >= 500:
-            raise OsrmUnavailable(f"OSRM {response.status_code}: {path}")
+            raise OsrmUnavailable(f"OSRM {response.status_code}: {endpoint}")
         try:
             payload = response.json()
         except ValueError as exc:
-            raise OsrmUnavailable("OSRM 응답이 JSON이 아니다") from exc
+            raise OsrmUnavailable(f"OSRM 응답이 JSON이 아니다: {endpoint}") from exc
 
         code = payload.get("code")
         if code != "Ok":
-            # NoSegment·NoRoute 등은 호출자가 의미를 정한다. 여기서는 실패로만 올린다.
-            raise OsrmUnavailable(f"OSRM code={code}")
+            # NoSegment·NoRoute 등 **코드의 의미는 호출자가 정한다.** 여기서는 코드를
+            # 실어 올리기만 한다. 아무도 따로 다루지 않으면 OsrmUnavailable로 남는다.
+            raise OsrmRefused(f"OSRM code={code}: {endpoint}", osrm_code=code)
         return payload
 
     def nearest(self, lon: float, lat: float) -> Snap | None:
-        """출발지 스냅. 붙일 곳이 없으면 None(호출자가 SNAP_FAILED로 다룬다)."""
-        payload = self._get(f"/nearest/v1/foot/{lon},{lat}", {"number": "1"})
+        """출발지 스냅. 붙일 곳이 없으면 None(호출자가 SNAP_FAILED로 다룬다).
+
+        **`NoSegment`는 OSRM 장애가 아니라 스냅 실패다.** v2.3 4-3 3단계가 "출발지
+        스냅 — OSRM `/nearest`. 스냅 실패는 `SNAP_FAILED`"라고 정했으므로 502가 아니라
+        400이어야 한다. 예전에는 `code != "Ok"`를 전부 OSRM 오류로 올려 502가 됐다.
+
+        이 변환은 **`/nearest`에만** 한다. `/table`의 `NoSegment`는 목적지 쪽 이야기라
+        출발지 스냅 실패가 아니고, 그쪽은 그대로 OSRM 오류(또는 밀도 incomplete)다.
+        `NoRoute`·`TooBig` 같은 다른 코드도 여기서 바꾸지 않는다.
+        """
+        try:
+            payload = self._get(
+                f"/nearest/v1/foot/{lon},{lat}", {"number": "1"}, endpoint=NEAREST_ENDPOINT
+            )
+        except OsrmRefused as exc:
+            if exc.osrm_code == NO_SEGMENT:
+                return None
+            raise
         waypoints = payload.get("waypoints") or []
         if not waypoints:
             return None
@@ -101,6 +137,7 @@ class OsrmClient:
                 "destinations": ";".join(str(i) for i in range(1, len(points))),
                 "annotations": "duration,distance",
             },
+            endpoint=TABLE_ENDPOINT,
         )
         return self._parse_table(payload, destinations)
 

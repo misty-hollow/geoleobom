@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest import mock
 
 import httpx
 import pytest
@@ -48,28 +49,54 @@ def _plan(gpkg: Path, sql: str, params: tuple) -> list[str]:
 
 
 def _candidate_sql_and_params(lon: float, lat: float, category: str, radius_m: float):
-    """`PoiRepository.find_candidates`가 쓰는 것과 같은 SQL을 만든다.
+    """**구현이 실제로 실행하는 SQL을 그대로 가져온다.**
 
-    구현에서 문자열을 꺼내 오지 않고 여기서 다시 적는 이유는, 구현이 바뀌면
-    이 검사가 **조용히 다른 것을 재지 않고** 실패하게 하기 위해서다. 두 문자열이
-    같은지는 아래 `test_repository_uses_this_shape`가 확인한다.
+    예전에는 같은 SQL을 여기에 손으로 다시 적었다. 그러면 구현을 평범한 JOIN으로
+    되돌려도 이 검사는 **여기 적힌 옛 문자열**의 계획을 재고 통과한다 — 복제품만
+    검증하는 셈이라 무엇을 막고 있는지 보장이 없었다. 이제 둘이 같은 문자열이다.
     """
-    min_lon, min_lat, max_lon, max_lat = bbox_for(lon, lat, radius_m)
-    sql = (
-        "SELECT p.fid, p.name, p.category, p.lon, p.lat FROM poi p "
-        "WHERE p.fid IN (SELECT id FROM rtree_poi_geom "
-        "  WHERE maxx >= ? AND minx <= ? AND maxy >= ? AND miny <= ?) "
-        "AND p.category = ?"
+    return PoiRepository.candidate_query(lon, lat, category, radius_m)
+
+
+def test_the_plan_check_measures_the_implementation_query(dense_gpkg):
+    """검사가 재는 SQL이 `find_candidates`가 실행하는 것과 같은지.
+
+    실제 조회가 `candidate_query`를 거치는지 확인해, 이 파일의 계획 검사가 아무도
+    실행하지 않는 문자열을 재는 일이 없게 한다.
+    """
+    seen: dict[str, object] = {}
+    real_query = PoiRepository.candidate_query
+
+    def spy(lon, lat, category, radius_m):
+        sql, params = real_query(lon, lat, category, radius_m)
+        seen["sql"], seen["params"] = sql, params
+        return sql, params
+
+    repository = PoiRepository(dense_gpkg)
+    with mock.patch.object(PoiRepository, "candidate_query", staticmethod(spy)):
+        repository.find_candidates(
+            lon=CENTER_LON, lat=CENTER_LAT, category=DENSITY_CATEGORY, radius_m=DENSITY_RADIUS_M
+        )
+
+    assert seen, "find_candidates가 candidate_query를 쓰지 않는다"
+    expected_sql, expected_params = real_query(
+        CENTER_LON, CENTER_LAT, DENSITY_CATEGORY, DENSITY_RADIUS_M
     )
-    return sql, (min_lon, max_lon, min_lat, max_lat, category)
+    assert seen["sql"] == expected_sql
+    assert seen["params"] == expected_params
 
 
 def test_repository_uses_the_rtree_first_shape():
-    """구현이 서브쿼리 형태를 유지하는지. 평범한 JOIN으로 되돌리면 실패한다."""
-    source = Path(PoiRepository.__module__.replace(".", "/") + ".py")
-    text = (Path(__file__).resolve().parents[1] / source).read_text(encoding="utf-8")
-    assert "p.fid IN (SELECT id FROM" in text, "R*Tree 서브쿼리 형태가 아니다"
-    assert "FROM rtree_poi_geom r JOIN" not in text, "옛 JOIN 형태가 남아 있다"
+    """구현이 서브쿼리 형태를 유지하는지. 평범한 JOIN으로 되돌리면 실패한다.
+
+    **구현이 만든 문자열을 본다.** 소스 파일을 문자열로 뒤지면 주석이나 쓰이지 않는
+    코드에 걸려도 통과한다.
+    """
+    sql, _ = PoiRepository.candidate_query(
+        CENTER_LON, CENTER_LAT, DENSITY_CATEGORY, DENSITY_RADIUS_M
+    )
+    assert "p.fid IN (SELECT id FROM" in sql, f"R*Tree 서브쿼리 형태가 아니다: {sql}"
+    assert "rtree_poi_geom r JOIN" not in sql, f"옛 JOIN 형태다: {sql}"
 
 
 def test_query_plan_scans_the_rtree_first(dense_gpkg):

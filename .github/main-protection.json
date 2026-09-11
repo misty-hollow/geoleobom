@@ -1,18 +1,38 @@
 {
+  "_comment": [
+    "main 브랜치 보호 규칙의 **선언본**이다. GitHub의 실제 설정과 같아야 한다.",
+    "확인: gh api repos/misty-hollow/geoleobom/branches/main/protection",
+    "적용: gh api -X PUT repos/misty-hollow/geoleobom/branches/main/protection --input .github/main-protection.json",
+    "PUT은 전체를 덮어쓴다. 한 항목만 바꿀 때도 나머지를 모두 적어야 한다.",
+    "이 파일이 있다고 규칙이 켜지는 것은 아니다(AGENTS.md 3절). 실제 적용 여부는 위 GET으로 확인한다.",
+    "2026-09-12 사용자 승인: data-checks와 api-image를 필수 검사로 승격. 다른 항목은 바꾸지 않았다.",
+    "  - data-checks: 수집 폴리곤 불변식·validate_gpkg·매핑표 검사가 여기서만 돈다.",
+    "  - api-image: PR #13에서 이미지는 빌드됐는데 컨테이너가 기동하지 못한 사고가 있었다.",
+    "    이 검사가 docker run으로 기동까지 확인한다."
+  ],
   "required_status_checks": {
     "strict": true,
     "checks": [
-      {"context": "repository-baseline", "app_id": 15368}
+      {"context": "repository-baseline", "app_id": 15368},
+      {"context": "api-checks", "app_id": 15368},
+      {"context": "data-checks", "app_id": 15368},
+      {"context": "web-build", "app_id": 15368},
+      {"context": "api-image", "app_id": 15368}
     ]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {
     "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": false,
     "required_approving_review_count": 0
   },
   "restrictions": null,
   "required_linear_history": true,
   "allow_force_pushes": false,
   "allow_deletions": false,
-  "required_conversation_resolution": true
+  "block_creations": false,
+  "required_conversation_resolution": true,
+  "lock_branch": false,
+  "allow_fork_syncing": false
 }

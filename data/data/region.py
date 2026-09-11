@@ -36,10 +36,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import shapely
+from shapely.geometry import shape
+from shapely.ops import unary_union
+
 # 저장소 안의 기본 위치. api 패키지 안에 두어 **이미지에 같이 실린다.**
 # 데이터 배포본에 두면 배포본마다 빠질 수 있고, 지원 지역은 데이터가 아니라
 # 제품의 성질이므로 코드와 함께 버전이 매겨지는 편이 맞다.
 DEFAULT_REGION_PATH: Final[Path] = Path("api/app/region_data/chungcheong.geojson")
+
+# POI **수집** 폴리곤. 지원 판정 폴리곤과 달리 서버로 가지 않으므로 data/ 안에 둔다.
+# v2.3 1-3의 "서비스 경계 + 시설 검색 여유(3km)"이며, 지원 폴리곤을 부풀린 것이다.
+DEFAULT_COLLECTION_PATH: Final[Path] = Path("data/region_data/chungcheong_poi_collection.geojson")
 
 OSM_NAMES: Final[tuple[str, ...]] = (
     "대전광역시",
@@ -117,3 +125,57 @@ class ChungcheongRegion:
     @property
     def point_count(self) -> int:
         return sum(len(ring) for poly in self.polygons for ring in poly)
+
+
+class CollectionRegion:
+    """POI **수집** 폴리곤 (v2.3 1-3 '서비스 경계 + 시설 검색 여유 3km').
+
+    `ChungcheongRegion`과 역할이 다르다.
+
+    | 폴리곤 | 파일 | 쓰는 곳 |
+    |---|---|---|
+    | 지원 판정 | `api/app/region_data/chungcheong.geojson` | 서버 `region.supported` |
+    | POI 수집 | `data/region_data/chungcheong_poi_collection.geojson` | ingest가 원본을 거를 때 |
+
+    수집 폴리곤은 지원 폴리곤을 3km 부풀린 것이라 **항상 더 넓다.** 지원 판정에는
+    쓰지 않는다.
+
+    ## 왜 shapely인가
+
+    `ChungcheongRegion`은 서버의 순수 파이썬 구현을 **그대로 흉내 낸 것**이라 두 구현이
+    갈리지 않는지 검사할 수 있다. 수집 폴리곤은 서버에 대응물이 없고, 대신 전국 원본
+    수백만 행을 걸러야 한다. 순수 파이썬 ray casting으로 697점 폴리곤을 350만 번
+    돌리면 몇 시간이 걸린다. 여기서는 준비된(prepared) 기하로 C 쪽에서 판정한다.
+    """
+
+    DEFAULT_PATH = DEFAULT_COLLECTION_PATH
+
+    def __init__(self, geometry, version: str, touching_sido: tuple[str, ...] = ()) -> None:
+        self._geometry = geometry
+        # prepare()가 공간 색인을 만들어 둔다. 이후 contains 판정이 훨씬 싸다.
+        shapely.prepare(self._geometry)
+        self.version = version
+        self.bbox: tuple[float, float, float, float] = geometry.bounds
+        #: 이 폴리곤에 닿는 행정 시도. 원본을 어디까지 읽어야 하는지 정한다.
+        self.touching_sido = touching_sido
+
+    @classmethod
+    def load(cls, path: Path | None = None) -> CollectionRegion:
+        target = Path(path) if path is not None else DEFAULT_COLLECTION_PATH
+        data = json.loads(target.read_text(encoding="utf-8"))
+        geometries = [shape(feature["geometry"]) for feature in data["features"]]
+        if not geometries:
+            raise ValueError(f"수집 폴리곤이 비어 있다: {target}")
+        properties = data.get("properties", {})
+        return cls(
+            unary_union(geometries),
+            str(properties.get("version", "unknown")),
+            tuple(properties.get("touching_sido", ())),
+        )
+
+    def contains(self, lon: float, lat: float) -> bool:
+        # bbox로 먼저 자른다. 전국 원본에서는 대부분이 여기서 떨어진다.
+        min_lon, min_lat, max_lon, max_lat = self.bbox
+        if not (min_lon <= lon <= max_lon and min_lat <= lat <= max_lat):
+            return False
+        return bool(shapely.contains_xy(self._geometry, lon, lat))

@@ -31,6 +31,10 @@ MAX_TABLE_DESTINATIONS: Final[int] = 160  # FastAPI 가드
 OSRM_MAX_TABLE_SIZE: Final[int] = 200
 SNAP_WARNING_M: Final[int] = 100
 
+# 5절 서버 구성: "api ... 분석 동시 실행 4". 워커 1은 프로세스가 하나라는 뜻이고,
+# 동기 엔드포인트는 스레드 풀에서 병렬로 도므로 앱이 따로 제한해야 한다.
+ANALYSIS_CONCURRENCY: Final[int] = 4
+
 # 4-1 OSRM 버전 고정: PC 전처리 이미지 태그 = 서버 이미지 태그.
 # data/osrm/versions.json·deploy/compose.yaml과 같아야 하며 테스트가 그 일치를 검사한다.
 OSRM_IMAGE: Final[str] = "ghcr.io/project-osrm/osrm-backend"

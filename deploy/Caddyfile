@@ -6,12 +6,37 @@
 
 # 필터 필드를 한 곳에만 적는다. 접근 로그와 **전역 기본 로거(오류 로그)** 두 곳에서
 # 같은 규칙을 써야 하는데, 두 벌로 적으면 한쪽만 고치는 사고가 난다.
+#
+# ## 헤더는 이름을 열거하지 않고 통째로 지운다
+#
+# 예전에는 `Referer`·`Referrer`·`Cookie` 세 이름만 지웠다. 그랬더니 나머지가 그대로
+# 남았다 — 실제 운영 로그에서 확인한 줄:
+#
+#   "headers": {"User-Agent":["probe/1.0"], "X-Forwarded-For":["203.0.113.9"], ...}
+#
+# `X-Forwarded-For`는 **클라이언트가 보낸 IP 문자열**이고 `User-Agent`는 지문이 된다.
+# 둘 다 v2.3 5절이 허용한 항목(요청 식별자·경로 템플릿·상태코드·응답시간·캐시
+# 히트/미스·목적지 수·배치 수)에 없다. 이름을 열거하는 방식은 **새 헤더가 생길
+# 때마다 새는 쪽으로 기울어서**, 객체째 지운다. 앞으로 어떤 헤더가 추가돼도 안전하다.
+#
+# ## client_ip를 지운다
+#
+# `remote_ip`에만 `ip_mask`를 걸어 놓고 `client_ip`를 놓쳤다. Caddy는 **둘 다** 찍고
+# `client_ip`에는 마스킹이 걸리지 않는다. 로컬에서 저장소 설정 그대로 띄워 확인한 줄:
+#
+#   "remote_ip": "172.17.0.0",   <- /24 마스킹됨
+#   "client_ip": "172.17.0.1"    <- 원본 그대로
+#
+# 프록시가 앞에 없으면 `client_ip`가 곧 접속자의 실제 IP다. 지운다.
+# `remote_ip`는 /24·/48 마스킹한 채로 남긴다 — 남용 대응에 쓸 최소한이고 개인을
+# 지목하지 않는다. 이건 앞선 결정이라 여기서 되돌리지 않는다.
 (redacted_fields) {
 	fields {
 		request>uri regexp "^(/p)/[^?]*|[?].*$" "$1"
-		request>headers>Referer delete
-		request>headers>Referrer delete
-		request>headers>Cookie delete
+		request>headers delete
+		request>client_ip delete
+		request>remote_port delete
+		resp_headers delete
 		request>remote_ip ip_mask {
 			ipv4 24
 			ipv6 48
@@ -53,10 +78,11 @@
 	# 백슬래시"로 해석되면 경로 전체가 지워진다(실제로 겪었다).
 	# 결과: /api/analyze?lon=..&lat=.. -> /api/analyze, /p/36.4,127.1 -> /p
 	#
-	# Referer는 **통째로 삭제한다.** URI만 정제하면 `/p/{좌표}` 페이지에서 `/api/*`를
-	# 부를 때 브라우저가 붙이는 Referer에 좌표가 그대로 남는다(실제로 로그에서 확인했다).
-	# 값을 다듬는 대신 지우는 이유는, 공유 URL에 좌표가 들어가는 구조라 Referer가
-	# 사실상 항상 민감하기 때문이다. Cookie도 같은 이유로 남기지 않는다.
+	# 헤더는 `request>headers`를 **객체째** 지운다. URI만 정제하면 `/p/{좌표}` 페이지에서
+	# `/api/*`를 부를 때 브라우저가 붙이는 Referer에 좌표가 그대로 남는다(실제로 로그에서
+	# 확인했다). 공유 URL에 좌표가 들어가는 구조라 Referer는 사실상 항상 민감하고,
+	# Cookie·X-Forwarded-For·User-Agent도 5절의 허용 목록에 없다. 이름을 하나씩
+	# 지우면 새 헤더가 생길 때마다 새므로 통째로 지운다.
 	log {
 		output stdout
 		format filter {

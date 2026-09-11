@@ -10,6 +10,7 @@ v2.3 4-4 에러 코드 집합에 추가한 것이 아니다.
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -45,16 +46,28 @@ app = FastAPI(title="걸어봄 API", version="0.0.1")
 install_access_log(app)
 settings = load_settings()
 _service: AnalysisService | None = None
+# 첫 요청들이 동시에 들어오면 서비스가 여러 개 만들어진다. 그러면 요청마다 **다른**
+# TTL 캐시와 **다른** 동시 실행 게이트를 쓰게 되어 5절의 "분석 동시 실행 4"가 깨지고
+# 캐시 히트율도 떨어진다. `/api/analyze`는 동기 함수라 스레드 풀에서 병렬로 들어온다.
+_service_lock = threading.Lock()
 
 
 def get_service() -> AnalysisService:
-    """분석 서비스를 처음 쓸 때 만든다. 준비 안 됐으면 503."""
+    """분석 서비스를 처음 쓸 때 만든다. 준비 안 됐으면 503.
+
+    이미 만들어져 있으면 락을 잡지 않는다(요청마다 직렬화되지 않게). 만드는 구간만
+    잠그고, 락 안에서 한 번 더 확인해 두 번 만들지 않는다.
+    """
     global _service
-    if _service is None:
-        if not settings.analysis_ready:
-            raise HTTPException(status_code=503, detail=ANALYSIS_UNAVAILABLE)
-        _service = AnalysisService.from_settings(settings)
-    return _service
+    service = _service
+    if service is not None:
+        return service
+    with _service_lock:
+        if _service is None:
+            if not settings.analysis_ready:
+                raise HTTPException(status_code=503, detail=ANALYSIS_UNAVAILABLE)
+            _service = AnalysisService.from_settings(settings)
+        return _service
 
 
 @app.exception_handler(ProductError)

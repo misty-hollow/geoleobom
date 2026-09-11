@@ -71,6 +71,35 @@ class PoiRepository:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @staticmethod
+    def candidate_query(
+        lon: float, lat: float, category: str, radius_m: float
+    ) -> tuple[str, tuple]:
+        """후보 조회의 SQL과 인자. **검사가 이 함수를 불러 계획을 잰다.**
+
+        예전에는 검사가 같은 SQL을 손으로 다시 적었다. 그러면 구현을 바꿔도 검사는
+        **옛 문자열의 계획**을 재고 통과한다 — 무엇을 재고 있는지 보장이 없다.
+        이제 구현과 검사가 같은 문자열을 쓴다.
+
+        **R*Tree를 먼저 훑게 강제한다.** 평범한 JOIN으로 쓰면 SQLite가
+        `idx_poi_category`를 바깥 루프로 골라 그 카테고리의 모든 행마다 R*Tree를
+        찔러 본다. 실데이터에서 `food_cafe`가 96,197행이라 한 번 조회에 200ms가
+        걸렸다(합성 데이터 920행일 때는 드러나지 않았다).
+
+            JOIN      SEARCH p USING INDEX idx_poi_category / SCAN r VIRTUAL TABLE  -> 202ms
+            IN 서브쿼리  SCAN rtree VIRTUAL TABLE / SEARCH p USING INDEX             ->   6.7ms
+
+        서브쿼리가 R*Tree 결과(수천 건)를 먼저 만들고 그 fid만 본다.
+        """
+        min_lon, min_lat, max_lon, max_lat = bbox_for(lon, lat, radius_m)
+        sql = (
+            f"SELECT p.fid, p.name, p.category, p.lon, p.lat FROM {TABLE} p "
+            f"WHERE p.fid IN (SELECT id FROM {RTREE_TABLE} "
+            "  WHERE maxx >= ? AND minx <= ? AND maxy >= ? AND miny <= ?) "
+            "AND p.category = ?"
+        )
+        return sql, (min_lon, max_lon, min_lat, max_lat, category)
+
     def find_candidates(
         self,
         *,
@@ -81,23 +110,7 @@ class PoiRepository:
         limit: int | None = None,
     ) -> list[Candidate]:
         """반경 안 후보를 직선거리 오름차순으로 돌려준다. limit은 상위 N개 제한이다."""
-        min_lon, min_lat, max_lon, max_lat = bbox_for(lon, lat, radius_m)
-        # **R*Tree를 먼저 훑게 강제한다.** 평범한 JOIN으로 쓰면 SQLite가
-        # `idx_poi_category`를 바깥 루프로 골라 그 카테고리의 모든 행마다 R*Tree를
-        # 찔러 본다. 실데이터에서 `food_cafe`가 96,197행이라 한 번 조회에 200ms가
-        # 걸렸다(합성 데이터 920행일 때는 드러나지 않았다).
-        #
-        #   JOIN      SEARCH p USING INDEX idx_poi_category / SCAN r VIRTUAL TABLE  -> 202ms
-        #   IN 서브쿼리  SCAN rtree VIRTUAL TABLE / SEARCH p USING INDEX             ->   6.7ms
-        #
-        # 서브쿼리가 R*Tree 결과(수천 건)를 먼저 만들고 그 fid만 본다.
-        sql = (
-            f"SELECT p.fid, p.name, p.category, p.lon, p.lat FROM {TABLE} p "
-            f"WHERE p.fid IN (SELECT id FROM {RTREE_TABLE} "
-            "  WHERE maxx >= ? AND minx <= ? AND maxy >= ? AND miny <= ?) "
-            "AND p.category = ?"
-        )
-        params = (min_lon, max_lon, min_lat, max_lat, category)
+        sql, params = self.candidate_query(lon, lat, category, radius_m)
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
 

@@ -15,7 +15,7 @@ import pytest
 from data.build_gpkg import BuildError, build, read_source_csv
 from data.make_fixture import build_rows, write_csv
 from data.schema import CATEGORIES, RTREE_TABLE, TABLE
-from data.validate_gpkg import validate
+from data.validate_gpkg import GeometryError, point_from_gpkg_blob, validate
 
 FIXTURE_CSV = Path(__file__).resolve().parents[1] / "fixtures" / "poi_synthetic.csv"
 
@@ -112,6 +112,111 @@ def test_validate_detects_coordinates_that_drift_from_the_rtree(gpkg: Path, tmp_
     assert not report.ok
     assert any("좌표 범위" in problem for problem in report.problems)
     assert any("R*Tree bbox" in problem for problem in report.problems)
+
+
+# --- geometry와 GeoPackage 메타데이터 -----------------------------------------
+#
+# **이 검사들은 나중에 붙었다.** `data/README.md`가 "`lon`/`lat`와 geometry 일치를
+# 확인한다"고 적어 두었는데 `validate_gpkg`가 geometry를 아예 읽지 않았다. 문서가
+# 말하는 보장을 실제로 하도록 고치면서, **그 검사가 진짜로 잡는지**도 확인한다.
+
+
+def test_geometry_blob_parses_into_the_same_point_as_the_columns(gpkg: Path):
+    """검사가 쓰는 파서가 실제 배포본 geometry를 읽어내는지."""
+    with sqlite3.connect(f"file:{gpkg}?mode=ro", uri=True) as conn:
+        rows = conn.execute(f"SELECT fid, geom, lon, lat FROM {TABLE}").fetchall()
+    assert rows
+    for fid, blob, lon, lat in rows:
+        parsed_lon, parsed_lat = point_from_gpkg_blob(blob)
+        assert parsed_lon == pytest.approx(lon, abs=1e-6), fid
+        assert parsed_lat == pytest.approx(lat, abs=1e-6), fid
+
+
+def test_validate_detects_geometry_that_disagrees_with_the_columns(gpkg: Path, tmp_path: Path):
+    """geometry는 그대로 두고 `lon`/`lat`만 옮기면 잡아내야 한다.
+
+    서버는 `lon`/`lat`만 읽으므로(v2.3 1-2) 이 어긋남은 조용히 틀린 거리를 만든다.
+    R*Tree bbox 검사만으로는 **geometry 자체를 본 것이 아니다.**
+
+    범위 안으로 옮겨 `좌표 범위` 문제에 묻히지 않게 한다.
+    """
+    broken = tmp_path / "geom-drift.gpkg"
+    broken.write_bytes(gpkg.read_bytes())
+    with sqlite3.connect(broken) as conn:
+        triggers = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?",
+                (TABLE,),
+            )
+        ]
+        for name in triggers:
+            conn.execute(f'DROP TRIGGER "{name}"')
+        # 충청권 안의 다른 지점. 범위 검사에는 걸리지 않는다.
+        conn.execute(f"UPDATE {TABLE} SET lon = 127.5, lat = 36.6 WHERE fid = 3")
+        conn.execute(
+            f"UPDATE {RTREE_TABLE} SET minx=127.5, maxx=127.5, miny=36.6, maxy=36.6 WHERE id = 3"
+        )
+
+    report = validate(broken)
+    assert not report.ok
+    assert any("geometry와 lon/lat이 다른" in problem for problem in report.problems), (
+        report.problems
+    )
+    # R*Tree는 함께 옮겼으므로 그쪽 검사로 잡힌 것이 아니다.
+    assert not any("R*Tree bbox" in problem for problem in report.problems), report.problems
+
+
+def test_validate_detects_a_wrong_srs_in_the_metadata(gpkg: Path, tmp_path: Path):
+    broken = tmp_path / "srs.gpkg"
+    broken.write_bytes(gpkg.read_bytes())
+    with sqlite3.connect(broken) as conn:
+        conn.execute(
+            "UPDATE gpkg_geometry_columns SET srs_id = 5179 WHERE table_name = ?", (TABLE,)
+        )
+
+    report = validate(broken)
+    assert not report.ok
+    assert any("srs_id" in problem for problem in report.problems), report.problems
+
+
+def test_validate_detects_a_wrong_geometry_type_in_the_metadata(gpkg: Path, tmp_path: Path):
+    broken = tmp_path / "geomtype.gpkg"
+    broken.write_bytes(gpkg.read_bytes())
+    with sqlite3.connect(broken) as conn:
+        conn.execute(
+            "UPDATE gpkg_geometry_columns SET geometry_type_name = 'LINESTRING' "
+            "WHERE table_name = ?",
+            (TABLE,),
+        )
+
+    report = validate(broken)
+    assert not report.ok
+    assert any("POINT" in problem for problem in report.problems), report.problems
+
+
+def test_validate_detects_a_missing_gpkg_contents_row(gpkg: Path, tmp_path: Path):
+    broken = tmp_path / "contents.gpkg"
+    broken.write_bytes(gpkg.read_bytes())
+    with sqlite3.connect(broken) as conn:
+        conn.execute("DELETE FROM gpkg_contents WHERE table_name = ?", (TABLE,))
+
+    report = validate(broken)
+    assert not report.ok
+    assert any("gpkg_contents" in problem for problem in report.problems), report.problems
+
+
+@pytest.mark.parametrize(
+    ("blob", "reason"),
+    [
+        (b"XX" + bytes(30), "GeoPackage geometry BLOB이 아니다"),
+        (b"GP\x00\x01" + bytes(4), "WKB가 잘렸다"),
+    ],
+)
+def test_geometry_parser_rejects_malformed_blobs(blob: bytes, reason: str):
+    with pytest.raises(GeometryError) as excinfo:
+        point_from_gpkg_blob(blob)
+    assert reason in str(excinfo.value)
 
 
 def _write_csv(path: Path, rows: list[dict[str, object]]) -> Path:

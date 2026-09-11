@@ -45,5 +45,22 @@ class OsrmUnavailable(UpstreamError):
     """OSRM 오류. 필수 호출이면 OSRM_ERROR(502)."""
 
 
+class OsrmRefused(OsrmUnavailable):
+    """OSRM이 `code != "Ok"`로 거절한 응답. 그 코드를 들고 있다.
+
+    코드의 **의미는 endpoint마다 다르다.** `/nearest`의 `NoSegment`는 "출발지를
+    보행망에 붙이지 못했다"라서 v2.3 4-3 3단계의 스냅 실패지만, `/table`의
+    `NoSegment`는 목적지 쪽 문제이므로 스냅 실패로 승격하지 않는다. 그래서 이
+    예외는 판단을 하지 않고 코드만 전달하며, 해석은 호출한 adapter 메서드가 한다.
+
+    기본 분류는 계속 `OsrmUnavailable`이다 — 아무도 따로 다루지 않으면 지금처럼
+    OSRM_ERROR(502)로 끝난다.
+    """
+
+    def __init__(self, message: str, *, osrm_code: str | None) -> None:
+        super().__init__(message)
+        self.osrm_code = osrm_code
+
+
 class UpstreamTimeout(UpstreamError):
     """상류 timeout. 필수 호출이면 TIMEOUT(504)."""
