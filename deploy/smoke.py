@@ -301,8 +301,15 @@ def main(argv: list[str] | None = None) -> int:
             print("\n실패가 있어 기준값을 쓰지 않는다.", file=sys.stderr)
         else:
             args.write_baseline.parent.mkdir(parents=True, exist_ok=True)
+            # 회귀 기준값에는 **매번 달라지는 값을 넣지 않는다.** 응답시간이 섞여 있으면
+            # 사람이 손으로 지우게 되고, 그러다 형식이 어긋난다. 대조는 summary만
+            # 보므로 저장도 summary까지만 한다.
+            baseline_out = {
+                spot: {key: value for key, value in entry.items() if key != "client_ms"}
+                for spot, entry in results.items()
+            }
             args.write_baseline.write_text(
-                json.dumps(results, ensure_ascii=False, indent=2) + "\n",
+                json.dumps(baseline_out, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
             print(f"\n기준값 저장: {args.write_baseline}")

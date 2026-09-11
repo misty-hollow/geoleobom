@@ -161,7 +161,7 @@ python deploy/smoke.py --base-url https://geoleobom.kr --baseline deploy/smoke_b
 
 ```
 python deploy/loadtest.py --base-url https://geoleobom.kr --mode latency
-python deploy/loadtest.py --base-url https://geoleobom.kr --mode load --concurrency 4 --rounds 6
+python deploy/loadtest.py --base-url https://geoleobom.kr --mode load --concurrency 4 --rounds 12
 ssh geoleobom 'bash -s 180' < deploy/sample_memory.sh > mem.tsv   # 부하와 동시에
 bash deploy/sample_memory.sh --summary mem.tsv
 ```
@@ -193,7 +193,9 @@ https://geoleobom.kr/            -> 200 (정적 페이지 유지)
 
 **롤백을 실제로 수행했다.** `rollback.sh code`로 직전 이미지로 되돌렸더니 그 이미지가 기동하지 못해 `/api/*`가 502가 됐고, **스모크가 5좌표 모두 실패로 잡았다.** 스크립트 성공을 복구 성공으로 치지 않는다는 것이 그대로 확인됐다. 곧바로 `deploy_api.sh`로 정상 이미지를 다시 올려 스모크가 기준값과 일치하는 것까지 확인했다.
 
-**Caddy 오류 로그 정제를 운영에서 확인했다.** api를 잠시 멈춰 502를 만들고 좌표·검색어·`Referer`가 든 요청을 보낸 뒤 로그를 읽었다. 남은 것은 경로 템플릿뿐이다(`/api/analyze`, `/api/search`). 좌표·검색어·`Referer` 모두 0건.
+**Caddy 오류 로그 정제를 운영에서 확인했다.** api를 잠시 멈춰 502를 만들고 좌표·검색어·`Referer`가 든 요청을 보낸 뒤 로그를 읽었다. 남은 것은 경로 템플릿뿐이다(`/api/analyze`, `/api/search`). 재적용 이후 구간에서 좌표·검색어·`Referer` 모두 0건.
+
+**단, 재적용 전에 기록된 오류 로그 5줄에는 쿼리 문자열이 그대로 남아 있다.** 첫 기동 때 Caddy가 옛 설정으로 돌던 구간이다. 그 좌표는 픽스처 좌표이고, 컨테이너를 재생성하면 로그와 함께 사라진다. **로그 규약을 고친 뒤에는 반드시 Caddy를 다시 읽히고, 그 전 로그가 남아 있다는 것을 염두에 둔다.**
 
 **`deploy_api.sh`는 Caddyfile을 복사하지만 Caddy를 다시 읽히지는 않는다.** Caddyfile은 바인드 마운트라 내용이 바뀌어도 컨테이너가 재생성되지 않는다. 이번에는 `docker exec geoleobom-caddy caddy reload --config /etc/caddy/Caddyfile`을 따로 실행했다. 스크립트에 넣는 것은 다음 작업이다.
 
@@ -214,11 +216,13 @@ https://geoleobom.kr/            -> 200 (정적 페이지 유지)
 | 서버 내부 처리 시간 (캐시 미스 66건, API 로그 `duration_ms`) | — | 최소 66 · 중앙 230 · p95 501 · 최대 550 ms | 기록 |
 | 부하 중 `MemAvailable` 최솟값 | 약 1GB 이상 | **2,821 MB** (표본 145개, 1초 간격) | 통과 |
 | 부하 중 스왑 | 지속적 I/O 없음 | 사용 0 MB, `pswpin`/`pswpout` 증가 **0 페이지** | 통과 |
-| 목적지 160개 요청 | 최대 후보 | 40건, **추가 배치 26건** | 확인 |
+| 목적지 160개 요청 | 최대 후보 | 다수, **추가 배치 26건** | 확인 |
 
 **클라이언트 체감과 서버 처리의 차이는 해외 리전 네트워크 지연이다.** 체감 중앙 663ms 중 서버 처리는 230ms이고 나머지가 왕복 지연이다. v2.3 10절은 이 경우 "VPS 증설로 해결된 것으로 취급하지 않는다"고 정했다. 현재는 기준을 만족하므로 조치가 필요 없다.
 
-**모바일(LTE) 응답시간은 아직 측정하지 않았다.** 유선만 쟀다.
+**응답시간 항목은 아직 "완료"가 아니다.** 10절은 `/api/analyze`뿐 아니라 **`/api/search`와 검색→분석→경로 표시 흐름**의 응답시간도 요구한다. 그 둘은 아직 501이라 측정할 대상이 없다. **모바일(LTE)도 측정하지 않았다** — 유선만 쟀다.
+
+**"캐시 미스"의 범위.** `loadtest.py`가 보장하는 것은 **클라이언트가 같은 좌표를 두 번 보내지 않는 것**이다. 서버 캐시는 TTL 30일이라, 위 순서대로 `latency`를 먼저 돌리면 그 5개 좌표가 이미 캐시에 남아 `load`의 첫 라운드 5건은 히트가 된다. 실제 서버 로그는 **미스 60 · 히트 5**였다. 부하 기준(오류·OOM·스왑 없음)에는 영향이 없지만, "60건 모두 미스"는 아니다.
 
 ## Git 저장·복구 (2026-09-10 실제 실행해 확인)
 
