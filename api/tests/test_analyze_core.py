@@ -53,12 +53,25 @@ def _density(count: int, start: int = 500) -> list[Candidate]:
     ]
 
 
-def _table(results: dict[int, TableResult], source: Snap | None = None) -> TableResponse:
-    """모의 `/table` 응답. `source`를 주지 않으면 core가 `/nearest` 스냅으로 물러선다."""
+# 모의 `/table`이 돌려주는 출발지. 실제 OSRM은 성공한 `/table`에 **항상** 이것을 싣는다.
+# 기본값은 `/nearest`가 고른 지점과 같게 둔다(`_snap_ok`).
+TABLE_SOURCE = Snap(lon=LON, lat=LAT, snap_distance_m=3.0, hint="table-source")
+
+
+def _table(results: dict[int, TableResult], source: Snap | None = TABLE_SOURCE) -> TableResponse:
+    """모의 `/table` 응답.
+
+    `source=None`은 **불완전한 응답**이다. 예전에는 그때 core가 `/nearest` 스냅으로
+    조용히 물러섰고 그것이 Astra finding 5-A다 — 이제는 OSRM_ERROR다.
+    """
     return TableResponse(results=results, source=source)
 
 
-def _all_reachable(batch: Sequence[Candidate]) -> TableResponse:
+def _all_reachable(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
+    # 목적지가 비면 adapter는 OSRM을 부르지 않고 빈 응답을 만든다(app/adapters/osrm.py).
+    # 출발지도 당연히 없다 — 그때만 core가 `/nearest` 스냅으로 물러설 수 있다.
+    if not batch:
+        return _table({}, source=None)
     return _table({c.fid: REACHABLE for c in batch})
 
 
@@ -102,7 +115,7 @@ def test_happy_path_shapes():
 
 
 def test_out_of_region_is_rejected_before_any_upstream_call():
-    def boom(batch: Sequence[Candidate]) -> TableResponse:
+    def boom(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
         raise AssertionError("지역 밖이면 상류를 부르지 않는다")
 
     outside = RegionInfo(supported=False, label="지원 밖", verified_area=False)
@@ -127,7 +140,15 @@ def test_far_origin_snap_warns_but_continues():
     위도 +0.0012도는 약 133m다.
     """
     far_lat = LAT + 0.0012
-    out = _run(snap_origin=lambda lon, lat: Snap(lon=lon, lat=far_lat, snap_distance_m=0.0))
+    # 권위 있는 스냅은 `/table`의 sources[0]이므로 **그것을** 멀리 둔다(2026-09-12 확정 ⓑ).
+    far_source = Snap(lon=LON, lat=far_lat, snap_distance_m=0.0, hint="far")
+    out = _run(
+        snap_origin=lambda lon, lat: Snap(lon=lon, lat=lat, snap_distance_m=0.0),
+        run_table=lambda origin, batch: _table(
+            {c.fid: REACHABLE for c in batch} if batch else {},
+            source=far_source if batch else None,
+        ),
+    )
 
     assert out.warnings == ("snap_warning",)
     assert out.density.status == "complete"
@@ -157,7 +178,7 @@ def test_table_source_becomes_the_analysis_snap_and_its_distance():
     table_lat = LAT + 0.0005
     table_source = Snap(lon=LON, lat=table_lat, snap_distance_m=1.0, hint="table-hint")
 
-    def run_table(batch: Sequence[Candidate]) -> TableResponse:
+    def run_table(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
         return _table({c.fid: REACHABLE for c in batch}, source=table_source)
 
     out = _run(snap_origin=lambda lon, lat: preliminary, run_table=run_table)
@@ -185,8 +206,77 @@ def test_analysis_snap_falls_back_to_nearest_only_without_a_table_source():
     assert 53.0 < out.snapped.snap_distance_m < 58.0
 
 
+def test_a_table_call_without_a_source_is_not_a_normal_response():
+    """**반례** (Astra finding 5-A): `/table`을 불렀는데 `sources`가 없는 응답.
+
+    예전에는 그때 조용히 `/nearest` 스냅으로 물러서서 정상 200을 만들었다. 그러면
+    응답 `snapped`와 `/route` 출발지는 `/nearest`가 고른 점인데 보행시간·거리는
+    `/table`이 **다른 점**에서 잰 값이라, 승인된 계약이 금지한 "서로 다른 스냅이 섞인"
+    결과가 그대로 나간다. 실제 OSRM에서 두 점이 24.8m·64.0m 어긋난 사례가 있다.
+
+    목적지가 있어 `/table`을 부른 이상, 출발지를 모르면 정상 응답을 만들지 않는다.
+    """
+    preliminary = Snap(lon=LON, lat=LAT + 0.0005, snap_distance_m=3.0)
+
+    def no_source(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
+        return _table({c.fid: REACHABLE for c in batch}, source=None)
+
+    with pytest.raises(ProductError) as excinfo:
+        _run(snap_origin=lambda lon, lat: preliminary, run_table=no_source)
+    assert excinfo.value.code == "OSRM_ERROR"
+    assert excinfo.value.http_status == 502
+
+
+def test_extra_density_batches_start_from_the_canonical_snap():
+    """추가 배치의 출발지는 `/nearest`가 아니라 `/table`이 고른 지점이다 (finding 5-B).
+
+    예전에는 모든 배치가 예비 스냅에서 출발했고 배치가 돌려준 출발지는 버렸다.
+    """
+    preliminary = Snap(lon=LON, lat=LAT, snap_distance_m=3.0)
+    canonical = Snap(lon=LON + 0.0004, lat=LAT, snap_distance_m=1.0, hint="table-source")
+    origins: list[Snap] = []
+
+    def run_table(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
+        origins.append(origin)
+        # 밀도 후보는 10분 밖이라 cap에 걸리지 않고 추가 배치까지 간다.
+        results = {c.fid: (BEYOND_TEN_MIN if c.fid >= 500 else REACHABLE) for c in batch}
+        return _table(results, source=canonical)
+
+    out = _run(
+        snap_origin=lambda lon, lat: preliminary,
+        density_candidates=_density(70),
+        run_table=run_table,
+    )
+
+    assert len(origins) == 2, "추가 배치가 실제로 일어나야 이 검사가 의미를 가진다"
+    assert (origins[0].lon, origins[0].lat) == (preliminary.lon, preliminary.lat)
+    assert (origins[1].lon, origins[1].lat) == (canonical.lon, canonical.lat)
+    assert origins[1].hint == canonical.hint
+    assert out.density.status == "complete"
+
+
+def test_a_density_batch_from_a_different_source_does_not_reach_the_count():
+    """**반례**: 추가 배치가 다른 지점에서 잰 값이면 정상 개수에 합치지 않는다."""
+    canonical = Snap(lon=LON, lat=LAT, snap_distance_m=1.0, hint="table-source")
+    # 실제 OSRM에서 관측된 어긋남(약 24.8m)과 같은 규모.
+    drifted = Snap(lon=LON + 0.00028, lat=LAT, snap_distance_m=2.0, hint="other")
+    calls = {"n": 0}
+
+    def run_table(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
+        calls["n"] += 1
+        results = {c.fid: (BEYOND_TEN_MIN if c.fid >= 500 else REACHABLE) for c in batch}
+        return _table(results, source=canonical if calls["n"] == 1 else drifted)
+
+    out = _run(density_candidates=_density(70), run_table=run_table)
+
+    assert calls["n"] == 2
+    assert (out.density.status, out.density.count) == ("incomplete", None)
+    # 핵심 결과는 그대로다. 밀도 한 배치가 어긋났다고 응답 전체를 죽이지 않는다(4-4).
+    assert all(n.status == "ok" for n in out.nearest)
+
+
 def test_required_table_osrm_error_maps_to_502():
-    def fail(batch: Sequence[Candidate]) -> TableResponse:
+    def fail(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
         raise OsrmUnavailable("first table down")
 
     with pytest.raises(ProductError) as excinfo:
@@ -196,7 +286,7 @@ def test_required_table_osrm_error_maps_to_502():
 
 
 def test_required_table_timeout_maps_to_504():
-    def fail(batch: Sequence[Candidate]) -> TableResponse:
+    def fail(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
         raise UpstreamTimeout("first table timeout")
 
     with pytest.raises(ProductError) as excinfo:
@@ -210,7 +300,7 @@ def test_extra_batch_failure_keeps_the_response(failure: type[Exception]):
     """같은 OSRM 오류라도 필수 호출과 추가 배치의 결과가 다르다 (v2.3 4-4 경계)."""
     calls = {"n": 0}
 
-    def first_ok_then_fail(batch: Sequence[Candidate]) -> TableResponse:
+    def first_ok_then_fail(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
         calls["n"] += 1
         if calls["n"] == 1:
             # 밀도 후보(fid >= 500)는 10분 밖이라 cap에 걸리지 않고 추가 배치로 넘어간다.
@@ -232,7 +322,7 @@ def test_cache_hit_returns_the_original_computed_at_without_calling_upstream():
     first_moment = datetime(2026, 9, 11, 3, 11, 23, tzinfo=UTC)
     first = _run(cache=cache, now=_fixed_clock(first_moment))
 
-    def boom(batch: Sequence[Candidate]) -> TableResponse:
+    def boom(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
         raise AssertionError("캐시 히트에서는 상류를 부르지 않는다")
 
     second = _run(
@@ -256,12 +346,12 @@ def test_neighbouring_five_digit_inputs_are_computed_separately():
 def test_first_table_receives_deduped_destinations_within_the_guard():
     seen: list[int] = []
 
-    def capture(batch: Sequence[Candidate]) -> TableResponse:
+    def capture(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
         seen.append(len(batch))
         fids = [c.fid for c in batch]
         assert len(fids) == len(set(fids))
         assert len(fids) <= 160
-        return _all_reachable(batch)
+        return _all_reachable(origin, batch)
 
     _run(nearest_candidates=_nearest(20), density_candidates=_density(60), run_table=capture)
     assert seen[0] == 160

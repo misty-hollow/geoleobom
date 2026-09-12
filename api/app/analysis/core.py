@@ -29,7 +29,14 @@ from app.analysis.models import (
 from app.analysis.nearest import select_nearest
 from app.contract import NEAREST_CATEGORIES, SNAP_WARNING_M
 
-RunTable = Callable[[Sequence[Candidate]], TableResponse]
+"""`/table` 한 번. **출발지를 호출자가 명시한다.**
+
+첫 배치는 예비 스냅(`/nearest`)에서 출발하지만, 그 뒤의 밀도 배치는 `/table`이 고른
+권위 있는 스냅에서 출발해야 한다 — 같은 결과에 합칠 값이기 때문이다. 예전에는
+adapter가 `/nearest` 스냅 하나를 붙들고 모든 배치를 거기서 불렀다(Astra finding 5).
+"""
+
+RunTable = Callable[[Snap, Sequence[Candidate]], TableResponse]
 SnapOrigin = Callable[[float, float], Snap | None]
 
 
@@ -84,13 +91,24 @@ def _route_context(
 
 
 def _canonical_snap(
-    lon: float, lat: float, *, table_source: Snap | None, preliminary: Snap
+    lon: float, lat: float, *, table_source: Snap | None, preliminary: Snap, table_called: bool
 ) -> Snap:
     """분석의 권위 있는 출발지 스냅 (v2.4 4-3 3단계, 2026-09-12 사용자 확정 ⓑ).
 
     `/table`의 `sources[0]`이 있으면 그것이다. 없을 수 있는 경우는 목적지가 하나도 없어
     `/table`을 아예 부르지 않은 때뿐이며, 그때는 예비 스냅(`/nearest`)으로 물러선다.
     값을 지어내지 않는다.
+
+    ## `/table`을 불렀는데 source가 없으면 **정상 응답을 만들지 않는다**
+
+    예전에는 그 경우에도 조용히 `/nearest` 스냅으로 물러섰다(Astra finding 5-A).
+    그러면 응답의 `snapped`와 `/route` 출발지는 `/nearest`가 고른 점인데 보행시간·거리는
+    `/table`이 **다른 점**에서 잰 값이라, 승인된 계약이 금지한 "서로 다른 스냅이 섞인"
+    결과가 그대로 나간다. 실제 OSRM에서 두 점이 24.8m·64.0m 어긋난 사례가 있다.
+
+    `/nearest` 물러섬이 허용되는 것은 `/table`을 **아예 부르지 않은** 때뿐이다.
+    불렀는데 출발지를 말해 주지 않았다면 이번 요청의 필수 결과를 완성하지 못한 것이므로
+    `OSRM_ERROR`다 — `required_upstream`이 다른 `/table` 실패에 쓰는 것과 같은 의미다.
 
     ## `snap_distance_m`을 다시 잰다
 
@@ -102,6 +120,8 @@ def _canonical_snap(
     그래서 `lon`·`lat`(응답 `input`과 같은 값)과 `snapped`가 항상 같은 두 점을 가리키고,
     100m `snap_warning`도 그 하나의 거리로 판정한다.
     """
+    if table_source is None and table_called:
+        raise ProductError("OSRM_ERROR", "경로 계산에 실패했습니다 (출발지 스냅 없음)")
     chosen = table_source if table_source is not None else preliminary
     return Snap(
         lon=chosen.lon,
@@ -157,7 +177,8 @@ def analyze(
         density_candidates=density_candidates,
     )
 
-    first = required_upstream(lambda: run_table(destinations))
+    # 첫 배치는 예비 스냅에서 출발한다. 아직 권위 있는 지점을 모르기 때문이다.
+    first = required_upstream(lambda: run_table(preliminary, destinations))
     first_results = first.results
 
     # **분석의 출발지는 `/table`이 실제로 쓴 지점이다** (v2.4 4-3 3·10단계).
@@ -167,7 +188,15 @@ def analyze(
     # 고른다. 스모크 5좌표 중 2곳에서 24.8m·64.0m 어긋났다. **보행시간·거리를 실제로 잰
     # 출발지는 `/table` 쪽**이므로 그것이 분석의 권위 있는 스냅이고, 응답 `snapped`와
     # `/route`의 출발지가 모두 이 하나를 가리킨다.
-    snapped = _canonical_snap(lon, lat, table_source=first.source, preliminary=preliminary)
+    snapped = _canonical_snap(
+        lon,
+        lat,
+        table_source=first.source,
+        preliminary=preliminary,
+        # 목적지가 하나라도 있으면 adapter가 실제로 `/table`을 부른다. 비어 있으면
+        # 부르지 않고 빈 응답을 만든다 — 그때만 `/nearest`로 물러설 수 있다.
+        table_called=len(destinations) > 0,
+    )
 
     warnings: tuple[str, ...] = ()
     if snapped.snap_distance_m > SNAP_WARNING_M:
@@ -183,11 +212,17 @@ def analyze(
     )
 
     # 여기부터는 핵심 결과가 완성된 뒤다. 추가 배치 실패는 오류가 아니라 incomplete다.
+    #
+    # **추가 배치는 권위 있는 스냅에서 출발한다.** 예전에는 예비 스냅에서 불렀고
+    # 배치마다 돌아온 `sources[0]`을 버렸다(Astra finding 5-B). 실제 OSRM은 목적지
+    # 집합에 따라 다른 phantom node를 고르며 그 차이가 24.8m까지 났다 — 다른 지점에서
+    # 잰 도보시간을 같은 10분 집계에 합치면 그 숫자는 한 출발지의 것이 아니다.
     density = aggregate_density(
         candidates=density_candidates,
         first_batch=density_batch,
         first_results=first_results,
-        fetch_batch=lambda batch: run_table(batch).results,
+        fetch_batch=lambda batch: run_table(snapped, batch),
+        canonical=snapped,
         budget_exceeded=budget_exceeded,
     )
 

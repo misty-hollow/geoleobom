@@ -67,12 +67,16 @@ class _Osrm:
         *,
         route_waypoints=None,
         reject_hints: bool = False,
-        table_source: tuple[float, float] | None = None,
+        table_source: tuple[float, float] | None = ORIGIN_SNAP,
     ) -> None:
         self.route_requests: list[httpx.Request] = []
         self._reject_hints = reject_hints
-        # `/table` 응답의 `sources[0]`. None이면 그 필드를 아예 넣지 않아
-        # 예전 OSRM 응답 모양(= core가 `/nearest` 스냅으로 물러서는 경로)을 흉내 낸다.
+        # `/table` 응답의 `sources[0]`. 기본값은 `/nearest`와 같은 지점이다 —
+        # 실제 OSRM은 성공한 `/table`에 **항상** 이 필드를 싣는다.
+        #
+        # `None`을 주면 그 필드를 아예 빼서 **불완전한 응답**을 흉내 낸다. 예전에는
+        # 그때 core가 조용히 `/nearest` 스냅으로 물러섰고, 그것이 Astra finding 5-A다.
+        # 이제는 `/table`을 불렀는데 출발지를 모르면 OSRM_ERROR다.
         self._table_source = table_source
         # 기본값: OSRM이 요청받은 그 지점을 그대로 썼다고 답한다.
         self._route_waypoints = route_waypoints or [
@@ -207,12 +211,16 @@ def test_route_uses_the_snap_points_table_chose(client: TestClient, osrm: _Osrm)
 
 
 def test_route_pins_the_snap_with_osrm_hints(client: TestClient, osrm: _Osrm):
-    """좌표만으로는 "같은 지점"을 보장할 수 없다. hint로 그 phantom node를 못박는다."""
+    """좌표만으로는 "같은 지점"을 보장할 수 없다. hint로 그 phantom node를 못박는다.
+
+    출발지 hint는 **`/table`의 sources[0]이 준 것**이다(2026-09-12 확정 ⓑ). `/nearest`가
+    준 `ORIGIN_HINT`가 아니다 — 보행시간을 실제로 잰 쪽의 지점을 못박아야 의미가 있다.
+    """
     fid, _ = _a_best_fid(client)
     client.get("/api/route", params={"lon": CENTER_LON, "lat": CENTER_LAT, "fid": fid})
 
     query = parse_qs(osrm.route_requests[0].url.query.decode())
-    assert query["hints"] == [f"{ORIGIN_HINT};{DEST_HINT}"]
+    assert query["hints"] == [f"{TABLE_SOURCE_HINT};{DEST_HINT}"]
     assert query["geometries"] == ["geojson"]
     assert query["overview"] == ["full"]
 

@@ -60,6 +60,9 @@ def _reachable_handler(duration: float = 360.0, snap: float = 4.0):
                 "durations": [[duration] * count],
                 "distances": [[duration * 1.3] * count],
                 "destinations": [{"distance": snap}] * count,
+                # 실제 OSRM은 성공한 `/table`에 **항상** sources를 싣는다. 빼고 검사하면
+                # "출발지 없는 정상 응답"이라는 있지도 않은 경우를 기본값으로 삼게 된다.
+                "sources": [{"location": [CENTER_LON, CENTER_LAT], "distance": 3.0}],
             },
         )
 
@@ -209,7 +212,19 @@ def test_far_snap_sets_the_warning(synthetic_gpkg: Path):
                     "waypoints": [{"location": [CENTER_LON, far_lat], "distance": 0.0}],
                 },
             )
-        return _reachable_handler()(request)
+        # 권위 있는 스냅은 `/table`의 sources[0]이므로 **그것도** 멀리 둔다. `/nearest`만
+        # 멀고 `/table`이 가까운 지점을 고르면 응답 `snapped`는 가까운 쪽이고 경고도 없다.
+        count = request.url.path.rstrip("/").count(";")
+        return httpx.Response(
+            200,
+            json={
+                "code": "Ok",
+                "durations": [[360.0] * count],
+                "distances": [[468.0] * count],
+                "destinations": [{"distance": 4.0}] * count,
+                "sources": [{"location": [CENTER_LON, far_lat], "distance": 0.0}],
+            },
+        )
 
     with _client(synthetic_gpkg, handler) as client:
         body = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT}).json()
@@ -217,6 +232,48 @@ def test_far_snap_sets_the_warning(synthetic_gpkg: Path):
     assert body["warnings"] == ["snap_warning"]
     assert body["snapped"]["lat"] == far_lat
     assert 130.0 < body["snapped"]["snap_distance_m"] < 136.0
+
+
+def test_a_table_response_without_sources_is_502_not_a_quiet_fallback(synthetic_gpkg: Path):
+    """**반례** (Astra finding 5-A): `/table`이 `sources`를 빼고 200을 돌려준다.
+
+    예전에는 그때 조용히 `/nearest` 스냅으로 물러서서 **정상 200**을 만들었다. 응답
+    `snapped`와 `/route` 출발지는 `/nearest`가 고른 점인데 보행시간·거리는 `/table`이
+    다른 점에서 잰 값이라, 계약이 금지한 "서로 다른 스냅이 섞인" 결과가 그대로 나갔다.
+
+    `/nearest` 물러섬이 허용되는 것은 `/table`을 **아예 부르지 않은** 때뿐이다.
+    """
+    nearest_lat = CENTER_LAT + 0.0005
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/nearest"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "Ok",
+                    "waypoints": [{"location": [CENTER_LON, nearest_lat], "distance": 22.0}],
+                },
+            )
+        count = request.url.path.rstrip("/").count(";")
+        return httpx.Response(
+            200,
+            json={
+                "code": "Ok",
+                "durations": [[360.0] * count],
+                "distances": [[468.0] * count],
+                "destinations": [{"distance": 4.0}] * count,
+                # sources 없음.
+            },
+        )
+
+    with _client(synthetic_gpkg, handler) as client:
+        response = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT})
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["code"] == "OSRM_ERROR"
+    # 새 오류 코드를 만들지 않았다 (v2.4 4-4는 6종 그대로다).
+    assert set(body) == {"code", "message"}
 
 
 def test_snapped_is_the_table_source_not_the_nearest_snap(synthetic_gpkg: Path):

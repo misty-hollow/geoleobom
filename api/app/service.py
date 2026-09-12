@@ -52,6 +52,7 @@ from app.analysis.models import (
     Snap,
     TableResponse,
 )
+from app.analysis.snap import same_snap_point
 from app.analysis.time_model import display_seconds, service_seconds
 from app.contract import (
     DENSITY_CATEGORY,
@@ -59,8 +60,6 @@ from app.contract import (
     NEAREST_CATEGORIES,
     NEAREST_RADIUS_M,
     NEAREST_TOP_N,
-    OSRM_COORD_SCALE,
-    ROUTE_SNAP_EPSILON_TICKS,
 )
 from app.region import REGION_LABEL, UNSUPPORTED_LABEL, load_region
 from app.request_log import RequestMetrics
@@ -221,21 +220,21 @@ class AnalysisService:
         metrics: RequestMetrics | None,
     ) -> AnalyzeResult:
         """후보가 준비된 상태에서 계산 core를 돌린다. 좌표는 이미 정규화돼 있다."""
-        snap_holder: list[Snap] = []
 
         def snap_origin(origin_lon: float, origin_lat: float) -> Snap | None:
-            snapped = self._osrm.nearest(origin_lon, origin_lat)
-            if snapped is not None:
-                snap_holder.append(snapped)
-            return snapped
+            return self._osrm.nearest(origin_lon, origin_lat)
 
-        def run_table(batch: Sequence[Candidate]) -> TableResponse:
-            if not snap_holder:
-                raise RuntimeError("스냅 전에 /table을 부를 수 없다")
+        def run_table(origin: Snap, batch: Sequence[Candidate]) -> TableResponse:
+            """**출발지는 core가 정한다.**
+
+            예전에는 이 함수가 `/nearest` 스냅 하나를 붙들고 모든 배치를 거기서 불렀다.
+            그래서 추가 밀도 배치도 예비 지점에서 출발했다(Astra finding 5-B). 이제
+            첫 배치는 예비 스냅, 그 뒤는 `/table`이 고른 권위 있는 스냅에서 출발한다.
+            """
             # 5절이 허용한 "목적지 수·배치 수"는 여기서만 센다. 좌표는 세지 않는다.
             if metrics is not None:
                 metrics.record_table(len(batch))
-            return self._osrm.table(snap_holder[0], batch, [coordinates[c.fid] for c in batch])
+            return self._osrm.table(origin, batch, [coordinates[c.fid] for c in batch])
 
         deadline = time.monotonic() + self._settings.analysis_budget_s
 
@@ -292,26 +291,6 @@ class AnalysisService:
         """`/table` 요청에 넣을 좌표를 fid로 기억해 둔다."""
         for fid, plon, plat in self._poi.coordinates_for([c.fid for c in items]):
             coordinates[fid] = (plon, plat)
-
-
-def _ticks(degrees: float) -> int:
-    """좌표를 OSRM의 고정소수점 눈금(1e-6도) 정수로 바꾼다."""
-    return round(degrees * OSRM_COORD_SCALE)
-
-
-def same_snap_point(left: Snap, right: Snap) -> bool:
-    """두 스냅이 같은 지점인가 (v2.4 4-3 10단계).
-
-    OSRM은 좌표를 1e-6도 고정소수점으로 들고 있으므로 같은 phantom node면 같은 값이
-    나온다. 여유를 그 한 눈금으로 두어 확인이 공허해지지 않게 한다.
-
-    **비교는 도(度) 실수가 아니라 눈금 정수로 한다.** 실수로 빼면 한 눈금 차이가
-    이진 표현 오차 때문에 1e-6보다 커지는 좌표가 있다(contract.py의 재현 사례).
-    """
-    return (
-        abs(_ticks(left.lon) - _ticks(right.lon)) <= ROUTE_SNAP_EPSILON_TICKS
-        and abs(_ticks(left.lat) - _ticks(right.lat)) <= ROUTE_SNAP_EPSILON_TICKS
-    )
 
 
 def _require_same_snap(leg: RouteLeg, *, origin: Snap, dest: Snap) -> None:
