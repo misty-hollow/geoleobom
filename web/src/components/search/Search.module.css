@@ -1,0 +1,169 @@
+/* 검색 필드·오버레이·listbox (DESIGN.md 10절, 설계 v1 화면 2) */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--safe-top);
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.overlayBox {
+  flex: 1 1 auto;
+}
+
+.overlayBox .fieldRow {
+  padding: var(--s-3) var(--s-3) var(--s-2);
+}
+
+.inlineBox .fieldRow {
+  padding: 0;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.field {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  height: var(--search-h);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--paper);
+}
+
+.field:focus-within {
+  /* 포커스: 2px accent, 레이아웃 시프트 없이 box-shadow로 (DESIGN.md 10절) */
+  border-color: var(--accent-600);
+  box-shadow: 0 0 0 1px var(--accent-600);
+}
+
+.fieldIcon {
+  flex: 0 0 auto;
+  margin-left: var(--s-3);
+  color: var(--ink-500);
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--s-3);
+  border: 0;
+  background: transparent;
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--ink-500);
+}
+
+.fieldSpinner {
+  flex: 0 0 auto;
+  margin-right: var(--s-4);
+}
+
+.clear {
+  flex: 0 0 var(--tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  color: var(--ink-500);
+  border-radius: var(--r-2);
+}
+
+.below {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.inlineBox .below {
+  overflow: visible;
+}
+
+.hint {
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: 0 var(--s-4) var(--s-3);
+}
+
+.failed .hint {
+  padding: var(--s-3) 0 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.inlineBox .list {
+  margin-top: var(--s-2);
+  border-top: 1px solid var(--line);
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: var(--row-h);
+  padding: var(--s-2) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.optionActive {
+  background: var(--accent-100);
+}
+
+.optionName {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.optionAddress {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .option:hover {
+    background: var(--canvas);
+  }
+  .optionActive:hover {
+    background: var(--accent-100);
+  }
+}

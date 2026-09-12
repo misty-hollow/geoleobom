@@ -1,0 +1,630 @@
+/* 결과 시트·패널 콘텐츠 (DESIGN.md 12~15절). 카드 없음, 행 + 1px 구분선. */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--pad-x) var(--s-6);
+}
+
+/* --- 헤더 ---------------------------------------------------------------- */
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: var(--s-1) 0 var(--s-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.headerText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.headerLabelRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.tag {
+  flex: 0 0 auto;
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--w-600);
+  color: var(--accent-600);
+  background: var(--accent-100);
+  border-radius: var(--r-1);
+  padding: 2px 6px;
+}
+
+.label {
+  font-size: var(--t-title);
+  line-height: var(--lh-title);
+  font-weight: var(--w-600);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 분석 완료 시 프로그램이 포커스를 옮기는 제목(tabIndex -1). 탭 순회 대상이 아니므로 링을 그리지 않는다. */
+.label:focus {
+  outline: none;
+}
+
+.secondary {
+  margin-top: 2px;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.headerActions {
+  flex: 0 0 auto;
+  display: flex;
+  /* 아이콘 버튼 44 두 개. 시트 우측 패딩과 아이콘 끝을 맞추기 위해 -12 보정. */
+  margin-right: -12px;
+  margin-top: -6px;
+}
+
+.saved {
+  color: var(--accent-600);
+}
+
+/* --- TrustLine ---------------------------------------------------------- */
+
+.trust {
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+}
+
+.trustLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--s-1);
+  color: var(--ink-900);
+  font-weight: var(--w-600);
+}
+
+.trustLine > span:not(:first-child)::before {
+  content: '·';
+  margin-right: var(--s-1);
+  color: var(--ink-300);
+}
+
+/*
+ * 기준일은 항상 둘째 줄. 확정 라벨 `데이터 기준일(가장 오래된 자료): {poi_date}`(약 30자)은 시트 320~
+ * 패널 440 어디서도 첫 줄에 이어 붙지 않아 flex-wrap이 매번 "· 데이터 기준일…"로 구분점을 줄 머리에
+ * 남겼다(QA 2026-09-12). 줄을 고정하고 구분점을 뺀다.
+ */
+.trustDate {
+  flex-basis: 100%;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 위 `span:not(:first-child)::before`(0,2,1)와 같은 특이성으로 뒤에 두어 이긴다. */
+.trustLine > span.trustDate::before {
+  content: none;
+  margin-right: 0;
+}
+
+.trustEstimate {
+  margin-top: 2px;
+  color: var(--ink-500);
+  font-weight: var(--w-400);
+}
+
+.warnBand {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 0;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-1);
+  background: var(--warn-100);
+  color: var(--warn-700);
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+}
+
+.warnBand svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 0;
+}
+
+/* --- 행 (NearestRow / DensityRow) ----------------------------------------- */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.rowItem {
+  border-bottom: 1px solid var(--line);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  column-gap: var(--s-3);
+  align-items: center;
+  width: 100%;
+  /* 행 56 고정(DESIGN.md 12절). 두 줄(24+20=44)은 min-height 안에서 세로 중앙 — 패딩을 더하면 60이 된다. */
+  min-height: var(--row-h);
+  padding: 0;
+  color: inherit;
+}
+
+.row:disabled {
+  cursor: default;
+}
+
+.rowIcon {
+  color: var(--ink-500);
+  align-self: center;
+}
+
+.rowMain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.rowName {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-400);
+  color: var(--ink-900);
+}
+
+.rowSub {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.rowNameInline {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.rowNameInline .rowSubInline {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.rowValue {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  min-width: 72px;
+  text-align: right;
+}
+
+.num {
+  display: inline-flex;
+  align-items: baseline;
+  font-size: var(--t-num-l);
+  line-height: var(--lh-num-l);
+  font-weight: var(--w-600);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+}
+
+.numUnit {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  font-weight: var(--w-600);
+  margin-left: 1px;
+}
+
+.numSmallWord {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  font-weight: var(--w-600);
+  white-space: nowrap;
+}
+
+.warn {
+  color: var(--warn-700);
+}
+
+.muted {
+  color: var(--muted-700);
+}
+
+.chevron {
+  color: var(--ink-500);
+  transition: transform var(--dur-expand) ease-out;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.chevronSpacer {
+  width: 20px;
+}
+
+.rowExpanded {
+  /* 확장 행 배경은 시트 패딩까지 bleed */
+  margin: 0 calc(-1 * var(--pad-x));
+  padding: 0 var(--pad-x);
+  background: var(--accent-100);
+}
+
+/* --- top3 --------------------------------------------------------------- */
+
+.top3 {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-expand) ease-out;
+}
+
+.top3Open {
+  grid-template-rows: 1fr;
+}
+
+.top3Inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.top3List {
+  padding: 0 0 var(--s-2) 32px;
+}
+
+.top3Note {
+  padding: var(--s-2) 0 var(--s-1) 32px;
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+  color: var(--warn-700);
+}
+
+.top3Item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--s-3);
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: var(--s-1) 0;
+  color: inherit;
+}
+
+.top3Item + .top3Item {
+  border-top: 1px solid rgba(23, 25, 28, 0.06);
+}
+
+.top3Name {
+  min-width: 0;
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top3Tags {
+  display: flex;
+  gap: var(--s-2);
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+  color: var(--ink-500);
+}
+
+.top3TagActive {
+  color: var(--accent-600);
+  font-weight: var(--w-600);
+}
+
+.top3Value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.top3Minutes {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+}
+
+.top3Meters {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.top3Quiet .top3Minutes {
+  font-weight: var(--w-400);
+  color: var(--ink-500);
+}
+
+/* --- 결과 설명 -------------------------------------------------------------- */
+
+.notice {
+  padding-top: var(--s-4);
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+  color: var(--ink-500);
+}
+
+/* --- 스켈레톤 ------------------------------------------------------------ */
+
+.skeletonRow {
+  display: grid;
+  grid-template-columns: 20px 1fr 56px;
+  column-gap: var(--s-3);
+  align-items: center;
+  min-height: var(--row-h);
+  border-bottom: 1px solid var(--line);
+}
+
+.bone {
+  display: block;
+  height: 14px;
+  border-radius: var(--r-1);
+  background: var(--canvas);
+}
+
+.boneIcon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.boneName {
+  width: 40%;
+}
+
+.boneValue {
+  height: 24px;
+}
+
+.skeletonText {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-4) 0;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.staleBand {
+  padding: var(--s-3) 0;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  font-weight: var(--w-600);
+  color: var(--ink-900);
+  border-bottom: 1px solid var(--line);
+}
+
+/* --- 오류 카드 ------------------------------------------------------------ */
+
+.errorCard {
+  margin-top: var(--s-4);
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.errorTitle {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+}
+
+.errorDanger {
+  color: var(--danger-700);
+}
+
+.errorBody {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.errorAction {
+  margin-top: var(--s-2);
+}
+
+/* --- peek: SummaryStrip · PendingBar · Hint · RoutePanel ------------------- */
+
+.peek {
+  padding: 0 var(--pad-x);
+  min-height: 108px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.hint {
+  min-height: 108px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--pad-x);
+  text-align: center;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.pendingCoord {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: var(--s-1);
+  padding: 0 0 var(--s-3);
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--s-1);
+  align-items: end;
+}
+
+.stripCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 52px;
+  justify-content: flex-end;
+  color: var(--ink-500);
+}
+
+.stripValue {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stripStatus {
+  font-size: var(--t-caption);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+}
+
+.stripLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: 52px;
+  font-size: var(--t-body-s);
+  color: var(--ink-500);
+}
+
+.routePanel {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--s-3);
+  align-items: center;
+  /* peek(.peek)·pinned 모두 시트 좌우 패딩을 지킨다. `0`으로 두면 .peek의 패딩을 덮어써 글자가 가장자리에 붙는다(QA 2026-09-12). */
+  padding: var(--s-2) var(--pad-x);
+}
+
+.routePanelPinned {
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.routeTitle {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.routeValue {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.routeMinutes {
+  font-size: var(--t-num-m);
+  line-height: var(--lh-num-m);
+  font-weight: var(--w-600);
+}
+
+.routeMinutesUnit {
+  font-size: var(--t-body-s);
+  font-weight: var(--w-600);
+}
+
+.routeMeters {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  color: var(--ink-500);
+}
+
+.routeText {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.routeActions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin-right: -8px;
+}
+
+/* --- 크로스페이드 ---------------------------------------------------------- */
+
+.fadeIn {
+  animation: fade var(--dur-fade) ease-out;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* --- 태블릿 시트: 콘텐츠 폭 중앙 --------------------------------------------- */
+
+@media (min-width: 768px) and (max-width: 959px) {
+  .strip {
+    max-width: 384px;
+    margin: 0 auto;
+  }
+}

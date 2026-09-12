@@ -56,6 +56,10 @@ data/build/
 node_modules/
 dist/
 dist-ssr/
+# 번들 비밀값 검사(web/scripts/check-bundle.mjs)가 쓰는 임시 빌드 결과.
+dist-keycheck/
+# 브라우저 QA(web/scripts/browser-qa.mjs)의 스크린샷·보고서.
+qa-shots/
 build/
 .vite/
 *.tsbuildinfo

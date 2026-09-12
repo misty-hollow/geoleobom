@@ -1,0 +1,134 @@
+/*
+ * 디자인 토큰 — 값의 유일한 출처 (web/DESIGN.md 3~5·11절).
+ * 컴포넌트 CSS에는 var(--…)만 쓴다. 리터럴 색·px는 여기에만 있다(예외: 1px 선, 0).
+ * 값을 바꾸려면 DESIGN.md를 같은 PR에서 고친다.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* 3-1. 기본 팔레트 */
+  --paper: #ffffff;
+  --canvas: #f6f7f8;
+  --ink-900: #17191c;
+  --ink-500: #6b7078;
+  --ink-300: #c6cad0;
+  --accent-600: #1f4fd0;
+
+  /* 3-2. 파생·의미 색 */
+  --line: #e3e6ea;
+  --accent-700: #173fa8;
+  --accent-100: #e6ecfb;
+  --route: #1f4fd0;
+  --warn-700: #8a5a00;
+  --warn-100: #fff4d6;
+  --danger-700: #a32d2d;
+  --danger-100: #fde8e8;
+  --muted-700: var(--ink-500);
+  --muted-100: #eef0f2;
+  --focus: #1f4fd0;
+
+  /* 4. 타이포그래피 */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', Pretendard, Roboto, 'Noto Sans KR',
+    'Malgun Gothic', system-ui, sans-serif;
+  --t-caption: 12px;
+  --lh-caption: 16px;
+  --t-body-s: 14px;
+  --lh-body-s: 20px;
+  --t-body: 16px;
+  --lh-body: 24px;
+  --t-title: 18px;
+  --lh-title: 26px;
+  --t-num-m: 22px;
+  --lh-num-m: 28px;
+  --t-num-l: 28px;
+  --lh-num-l: 32px;
+  --w-400: 400;
+  --w-600: 600;
+
+  /* 5. 간격·폭·모서리·선·그림자 */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --w-panel: 400px;
+  --w-sheet-content: 600px;
+  --w-compare: 960px;
+  --w-prose: 680px;
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-4: 16px;
+  --shadow-1: 0 1px 2px rgba(23, 25, 28, 0.08), 0 2px 8px rgba(23, 25, 28, 0.08);
+  --shadow-2: 0 -2px 12px rgba(23, 25, 28, 0.1);
+
+  /* 컨테이너 패딩·터치 타깃 */
+  --pad-x: var(--s-4);
+  --tap: 44px;
+  --row-h: 56px;
+  --topbar-h: 72px;
+  --search-h: 48px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* 11. Bottom sheet */
+  --sheet-peek: 132px;
+  --sheet-half: clamp(320px, 52dvh, 520px);
+
+  /* 16. 모션 */
+  --ease-snap: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-snap: 240ms;
+  --dur-fade: 120ms;
+  --dur-expand: 160ms;
+  --dur-save: 150ms;
+  --dur-toast: 160ms;
+
+  /* 비교표 (DESIGN.md 14절). 후보 열 기준 76, 허용 최소 72 — 표 최소 폭 = 첫 열 + 열 수 × 최소. */
+  --compare-first-col: 88px;
+  --compare-col: 76px;
+  --compare-col-min: 72px;
+  --compare-first-col-wide: 120px;
+  --compare-col-wide: 160px;
+}
+
+/* 20. 반응형 토큰 재정의는 여기에서만 */
+@media (max-width: 359px) {
+  :root {
+    --pad-x: var(--s-3);
+    --t-num-l: 24px;
+    --lh-num-l: 28px;
+  }
+}
+
+@media (min-width: 960px) {
+  :root {
+    --pad-x: var(--s-5);
+  }
+}
+
+@media (min-width: 1440px) {
+  :root {
+    --w-panel: 440px;
+  }
+}
+
+@media (max-height: 479px) {
+  :root {
+    --sheet-half: 60dvh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-snap: 0ms;
+    --dur-fade: 0ms;
+    --dur-expand: 0ms;
+    --dur-save: 0ms;
+    --dur-toast: 0ms;
+  }
+}
