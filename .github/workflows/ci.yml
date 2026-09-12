@@ -158,5 +158,38 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --no-fund --no-audit
 
+      # REST 키 이름이 번들에 실리는 파일에 없는지, SDK·env·좌표 반올림이 각자
+      # 한 모듈에만 있는지 (v2.4 4-1, 4-2).
+      - name: Check module boundaries
+        run: npm run check:boundaries
+
+      # 커밋된 TS 타입이 커밋된 OpenAPI에서 다시 생성한 것과 같은지 (v2.4 4-1).
+      # OpenAPI 자체가 앱과 같은지는 api-checks의 test_openapi_export.py가 본다.
+      # 두 검사 모두 필수라 한쪽만 고치고 병합할 수 없다.
+      # 추적되지 않은 파일은 `git diff`에 나오지 않는다 — 타입이 커밋되지 않았다면
+      # 이 검사는 **아무것도 확인하지 않고 통과한다.** 먼저 추적 여부를 못박는다.
+      - name: Regenerate API types and require no diff
+        run: |
+          git ls-files --error-unmatch src/api/schema.ts > /dev/null || {
+            echo '::error::src/api/schema.ts가 커밋되지 않았다. 생성 결과를 커밋해야 이 검사가 의미를 가진다.'
+            exit 1
+          }
+          npm run gen:api
+          git diff --exit-code -- src/api/schema.ts || {
+            echo '::error::생성된 API 타입이 커밋된 것과 다르다. `npm run gen:api` 결과를 커밋해라.'
+            exit 1
+          }
+
       - name: Type check and production build
         run: npm run build
+
+      # 좌표 정규화·비교 강조 규칙·상태 매핑·후보 저장·검색 디바운스·지도 훅은 손계산
+      # 픽스처로 검사한다(vitest + jsdom). 모의 응답이므로 실제 OSRM·실데이터 검증이 아니다.
+      - name: Run frontend tests
+        run: npm test
+
+      # **센티널 값으로 실제 빌드를 돌려** REST 키가 번들에 없는지 확인한다.
+      # 대조군(VITE_ JS 키는 번들에 있어야 한다)이 함께 들어 있어, 스캔이 아무것도
+      # 못 찾는 상태가 통과로 보이지 않는다 (v2.4 4-1, 5절).
+      - name: Prove the REST key never reaches the bundle
+        run: npm run check:bundle

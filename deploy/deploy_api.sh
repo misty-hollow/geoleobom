@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 코드 배포: GHCR 이미지를 커밋 SHA 태그 + digest로 고정해 서버에 반영한다.
 #
-# 기준: v2.3 4-1(서버에서 빌드하지 않는다), 5절(서버 구성), AGENTS.md 5절.
-# **데이터 교체와 분리한다.** 데이터는 deploy/deploy_data.sh가 담당한다.
+# 기준: v2.4 4-1(서버에서 빌드하지 않는다), 5절(서버 구성), AGENTS.md 5절.
+# **데이터 교체·웹 배포와 분리한다.** 데이터는 deploy/deploy_data.sh, 웹은 deploy/deploy_web.sh다.
 #
 # 사용법 (개발 PC에서):
 #   bash deploy/deploy_api.sh <커밋 SHA>
@@ -115,7 +115,10 @@ ssh "$HOST" "docker pull --quiet '$PINNED'" >/dev/null
 
 echo "== 2. 배포 설정 복사 (커밋 $COMMIT_SHA 의 deploy/)"
 scp -q "$STAGE_DIR/deploy/compose.yaml" "$STAGE_DIR/deploy/Caddyfile" "$HOST:$REMOTE_DIR/"
-scp -q -r "$STAGE_DIR/deploy/site" "$HOST:$REMOTE_DIR/"
+# 웹 배포물은 여기서 올리지 않는다. `deploy/deploy_web.sh`가 버전 디렉터리로 올리고
+# caddy는 /srv/geoleobom/web/current를 서빙한다. 디렉터리만 있어야 마운트가 성립하므로
+# 없으면 만들어 둔다(웹을 아직 배포하지 않았으면 빈 채로 남고 페이지만 404다).
+ssh "$HOST" "mkdir -p /srv/geoleobom/web"
 
 echo "== 3~5. .env 갱신 → up -d → 응답 대기 → digest 확인 → Caddy 재적용"
 ssh "$HOST" "bash -s" <<REMOTE
@@ -213,7 +216,9 @@ echo "== 6. 스모크 (픽스처 5좌표) — 통과해야 정상 복구 지점�
 # 기준값이 없으면 규약 불변식만 보면 되므로 여기서 멈출 이유가 없다.
 DATA_VERSION="$(ssh "$HOST" "grep '^GEOLEOBOM_DATA_VERSION=' $REMOTE_DIR/.env | cut -d= -f2- || true" | tr -d '\r\n')"
 BASELINE="$REPO_ROOT/deploy/smoke_baseline/$DATA_VERSION.json"
-SMOKE_ARGS=(--base-url "$BASE_URL")
+# `--pages`: 공개 사이트의 `/`와 `/p/{좌표}`가 200인지도 본다. Caddy 설정을 이 배포가
+# 함께 올리므로, SPA fallback이 깨지면 여기서 잡힌다.
+SMOKE_ARGS=(--base-url "$BASE_URL" --pages)
 if [[ -n "$DATA_VERSION" && -f "$BASELINE" ]]; then
 	SMOKE_ARGS+=(--baseline "$BASELINE")
 	echo "   기준값: $BASELINE"
