@@ -23,7 +23,7 @@
   - **남은 제품 결정(Fable, UX 권한)**: `/about` 문안(C 담당) · SummaryStrip 축약어(확인/불가/없음/미완료) 유지 여부 · uncertain(A) 확장 상태의 시간 표시 · 후보 이름 라벨 · 320×568 half에서 행 2.5개(J-5 "3개"에 미달 — 확정 기준일 라벨이 두 줄을 차지해서다).
   - **Opus 인수 항목(Engineering 권한)**: ⓐ `ci.yml` web-build 잡에 Fable이 추가한 4단계(check:boundaries · gen:api diff · npm test · check:bundle)의 통합 검토 — 파일의 다른 변경은 이전 작업 것 ⓑ `deploy/**`(Caddyfile·compose·deploy_api.sh·rollback.sh·smoke.py·새 deploy_web.sh·measure_flow.py·site/index.html 삭제) 미커밋 변경 검토와 커밋 분리(web vs CI/deploy) ⓒ `/api/search`·`/api/route` 501 해소 후 실제 계약 대조(mock은 schema 모양만 흉내) ⓓ `/p/*`·`/c` SPA fallback을 운영 smoke에 포함 ⓔ 운영 빌드에 카카오 JS 키 주입 경로와 허용 도메인(`geoleobom.kr`) ⓕ 브라우저 QA를 CI에 넣을지(playwright-core를 의존성으로 승격할지) 결정 ⓖ 이 PR의 위험 등급은 B(CI·배포 변경 포함) — 독립 검토 후 병합.
   - **Opus 5 engineering 인수 결과 (2026-09-12, 이번 세션).** 인수 항목 ⓐ~ⓕ를 실제로 확인했고 **실제 OSRM에서 `/api/route`를 깨뜨리는 결함 두 건**을 찾아 고쳤다. 상세는 아래 "Week 3 engineering 검증"을 본다.
-- **다음 작업: 사용자 판단 2건(아래 "판단 대기") → Codex/GPT 독립 검토 → PR. Fable — 사용자가 카카오 JS 키를 넣은 뒤 실제 지도 검증(위 미검증 목록)과 320×568 half 행 2.5개 판정.**
+- **다음 작업: Codex/GPT 독립 검토 → 병합. Fable — 사용자가 카카오 JS 키를 넣은 뒤 실제 지도 검증(위 미검증 목록)과 320×568 half 행 2.5개 판정.** 사용자 판단 2건은 2026-09-12에 확정됐다(아래 "확정된 결정"). Draft PR로 올렸고 **병합·배포는 하지 않았다.**
 
 - **직전 작업: Pre-Week3 hardening — 완료 (B급).** PR #16 병합(`52d5bd7`), 운영 배포·스모크·게이트 2 재측정까지 끝냈다. Fable 5.1 독립 검토 2회(1차 차단 1건, delta merge). GPT Astra의 누적 감사가 "다음 단위 전에 수정 필요"로 판정한 계산·동시성·배포·로그 방어 공백을 고쳤다. 8건 중 6건은 당시 main에서 재현했고, 1건(README/validate_gpkg 설명 불일치)은 코드로 확인했으며, **1건(OSRM `/nearest` NoSegment → 502)은 반례가 재현되지 않았다** — 아래 "막힌 점"을 본다.
 - **직전 작업: 실데이터 도입 — 완료 (B급).** 원본 3종 → 정제 CSV → `poi.gpkg` → 운영 교체 → 성능 재측정 → 데이터 롤백 검증까지 끝냈다. 결과는 README에 있다.
@@ -62,12 +62,22 @@
 - **ⓕ 브라우저 QA는 CI에 넣지 않는다.** `playwright-core`는 의존성으로 올리지 않는다 — 모의 픽스처 기준의 사람 QA 보조 도구라 CI의 "제품 정확성" 범위를 흐리고, 브라우저 바이너리 때문에 web-build가 느려진다. 실제 통합은 위의 실제 흐름 확인이 맡는다.
 - **ⓔ 카카오 JS 키 주입 경로.** `deploy/deploy_web.sh`가 **빌드 시점에** `VITE_KAKAO_JS_KEY`를 받아 번들에 넣는다(도메인 허용 목록으로 보호되는 공개 키다). 키 없이 돌리면 배포를 거부하고 `--allow-no-map-key`를 요구한다. 서버 전용 REST 키는 이 경로에 오지 않으며 `check:bundle`이 센티널 빌드로 그것을 확인한다. **카카오 개발자 콘솔의 허용 도메인에 `https://geoleobom.kr`을 넣는 것은 사용자 작업이다** — 개발용 `http://127.0.0.1:5173`만 등록돼 있다.
 - **ⓖ 위험 등급 B 유지.** CI·배포 변경과 계산 경로 변경이 함께 있다. 자동 병합 전에 현재 변경본의 독립 검토가 필요하다(AGENTS.md 2·3·4절). `snapped` 결정(판단 대기 1번)은 C급이라 사용자 승인 대상이다.
+- **출발지 스냅 의미 변경(ⓑ)을 적용하고 다시 확인했다.** 응답 `snapped`가 `/table`의 `sources[0]`이 되었고 `snap_distance_m`을 원 입력에서 다시 잰다. 회귀 검사 4건을 추가했고(core 3·endpoint 2·route endpoint 1), 실 OSRM에서 **75/75 성공**과 세 가지 일치(snapped=table source / 거리=haversine(input,snapped) / route.snapped_origin=analyze.snapped)를 재확인했다. 상세는 아래 "확정된 결정".
 - **아직 하지 않은 것**: 운영 서버 배포, 실제 카카오 키로의 검색, 게이트 2 응답시간 재측정(`deploy/measure_flow.py`가 준비돼 있다), 실제 카카오 JS SDK 지도 동작, 모바일(LTE) 측정, 독립 검토.
 
-## 판단 대기 (사용자)
+## 확정된 결정 (2026-09-12)
 
-1. **`/api/analyze`의 `snapped`가 무엇을 가리켜야 하는가 (C급 — 계산 의미).** 지금은 `/nearest`의 스냅이고, 그 값이 응답의 `snapped.lon/lat`·`snap_distance_m`과 100m `snap_warning` 판정에 쓰인다. 그런데 **보행시간을 실제로 잰 출발지는 `/table`의 스냅**이며 둘이 최대 64m 떨어진다. 이번 수정은 **`/route`만** `/table` 쪽을 쓰게 했고 `snapped`는 그대로 두었다 — 응답 값을 바꾸는 것은 계산 의미 변경이라 승인 대상이고, 바꾸면 `deploy/smoke_baseline/*.json` 세 배포본의 기준값을 다시 기록해야 한다. 최소 대안 셋: ⓐ 지금처럼 둔다(경로와 표시가 최대 64m 어긋난 채로 남는다) ⓑ `snapped`를 `/table`의 스냅으로 바꾼다(v2.4 4-3 3단계 문언 개정 + 기준값 재기록) ⓒ 두 값을 모두 싣는다(4-4 필드 추가 = 계약 변경).
-2. **v2.4 4-3 10단계 문언 정정 여부.** 본문("`/nearest`의 출발지 스냅을 보존")과 확인 조항("`/table`이 고른 지점과 같은지")이 서로 어긋나고, 실제 OSRM은 확인 조항 쪽이 맞다. 구현은 확인 조항을 따랐다. 문서를 고칠지는 승인 사항이다(1번과 함께 판단하면 된다).
+**출발지 스냅의 권위 — 대안 ⓑ 승인.** `/table`의 `sources[0]`이 분석의 canonical 스냅이고, `/nearest`는 `SNAP_FAILED` 판정과 `/table`에 보낼 좌표를 만드는 **내부 예비 스냅**이다. 응답 `snapped`·`/route`의 `snapped_origin`이 같은 하나를 가리키고, `snap_distance_m`과 100m `snap_warning`은 **원 입력 → 그 지점**의 거리로 판정한다. 서로 다른 스냅의 좌표와 거리를 섞지 않는다.
+
+- 규약 원문은 v2.4 4-3 3·10단계·4-4·부록 F 6번. 승인 기록은 PROJECT.md 6절. **v2.4는 아직 main에 병합된 적이 없으므로** 새 버전을 만들지 않고 그 안에서 정정했다.
+- `/route`의 스냅 일치 검사는 **약화하지 않았다.** 좌표+hint를 그대로 되돌려주고 실제 사용된 waypoint가 같은지 확인하며, 어긋나면 경로를 내보내지 않고 `OSRM_ERROR`다.
+- 실제 OSRM·실데이터 재확인: **route 75/75 성공**, `snapped == /table.sources[0]`(5좌표 중 2곳에서 `/nearest` 대비 24.8m·63.9m 이동), `snap_distance_m == haversine(input, snapped)` 5/5 일치, `route.snapped_origin == analyze.snapped` 5/5 일치.
+
+**`smoke_baseline/*.json`은 갱신할 것이 없었다 — 앞선 보고를 정정한다.** 인수 보고에서 "기준값 3개를 다시 기록해야 한다"고 적었으나 **사실이 아니다.** `deploy/smoke.py`의 `summarise()`가 기록하는 것은 `versions`·`region`·`warnings`·`nearest`·`density`이고 **`snapped`는 들어가지 않는다.** 그리고 이번 변경은 보행시간·거리를 바꾸지 않는다 — `/table`은 처음부터 자기 `sources[0]`에서 쟀고, 달라진 것은 응답이 어느 지점을 보고하느냐다.
+
+- 재현 가능한 배포본 두 개로 **실제로 대조해 확인**했다: `2026Q3-cc-03`(현재 운영 배포본)과 `synthetic-cc-01` 모두 **기존 기준값 그대로 통과**했다(`--baseline` 대조, 실패 0).
+- `2026Q3-cc-02`는 **개발 PC에 데이터가 없어 재현하지 못했다.** 다만 위 이유로 이 변경이 그 기준값을 무효화하지 않으므로 **미재기록 상태가 아니라 갱신 불요**다. 기대값을 지어내 덮어쓰지 않았다.
+- **`snapped`를 기준값 요약에 새로 넣지는 않았다.** 넣으면 세 기준값을 모두 다시 기록해야 하는데 `2026Q3-cc-02`는 재현할 수 없고, 그 버전이 **현재 롤백 대상(`previous`)**이라 롤백 시 스모크가 이유 없이 실패하게 된다. 이 의미는 대신 단위·계약 검사 4건과 실 OSRM 검사가 고정한다. **검토자 판단을 받을 항목으로 남긴다.**
 
 ## 저장소·자동화 현황 (2026-09-12)
 
