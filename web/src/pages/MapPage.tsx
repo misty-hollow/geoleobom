@@ -145,8 +145,8 @@ export function MapPage() {
   // --- URL 정규화: 주소창 좌표 = 분석·캐시 키 (v2.4 4-2) --------------------
   useEffect(() => {
     if (fixed === null || rawCoords === undefined) return
-    const canonical = toPathParam(fixed)
-    if (decodeURIComponent(rawCoords) !== canonical) {
+    // `rawCoords`는 라우터가 이미 푼 값이다. 여기서 다시 풀지 않는다(coords.ts 주석).
+    if (rawCoords !== toPathParam(fixed)) {
       navigate(toPlacePath(fixed), { replace: true, state: location.state })
     }
   }, [fixed, rawCoords, navigate, location.state])

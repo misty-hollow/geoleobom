@@ -92,10 +92,25 @@ export function toPlacePath(point: Point): string {
   return `/p/${toPathParam(point)}`
 }
 
-/** `/p/{lat},{lng}`의 파라미터를 읽는다. 입력 경계이므로 여기서 정규화한다. */
+/**
+ * `/p/{lat},{lng}`의 파라미터를 읽는다. 입력 경계이므로 여기서 정규화한다.
+ *
+ * ## 여기서 decode하지 않는다 — 라우터가 이미 했다
+ *
+ * react-router는 매칭할 때 경로 세그먼트를 `decodeURIComponent`로 풀어 `useParams`에
+ * 넘긴다(풀지 못하면 경고만 남기고 원문을 그대로 준다). 여기서 **또 풀면 두 번 푸는
+ * 것**이고, `/p/%25`처럼 정상 인코딩이 `%`로 풀린 값에 다시 `decodeURIComponent`를
+ * 부르면 `URIError: URI malformed`가 난다. 렌더 중 예외라 React가 트리를 버려
+ * **화면 전체가 비었다**(Astra finding 7).
+ *
+ * decode 책임은 라우터 한 곳이다. 이 함수는 이미 풀린 문자열을 받고, 좌표로 읽히지
+ * 않으면 `null`을 돌려준다 — 호출자는 그것을 "잘못된 좌표"로 이미 다루고 있다.
+ * `scripts/check-boundaries.mjs`가 `src/`에 `decodeURIComponent`가 다시 나타나지
+ * 않는지 검사한다.
+ */
 export function parsePathParam(raw: string | undefined): Point | null {
   if (!raw) return null
-  const parts = decodeURIComponent(raw).split(',')
+  const parts = raw.split(',')
   if (parts.length !== 2) return null
   const lat = Number(parts[0])
   const lng = Number(parts[1])

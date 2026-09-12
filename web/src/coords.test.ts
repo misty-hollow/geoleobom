@@ -93,8 +93,28 @@ describe('순서 경계 — 내부 [lon, lat] ↔ URL lat,lng ↔ 카카오 (lat
     expect(parsePathParam('127.1402,36.4713')).toBeNull()
   })
 
-  it('URL 인코딩된 쉼표도 읽는다', () => {
-    expect(parsePathParam('36.4713%2C127.1402')!.lonText).toBe('127.14020')
+  /**
+   * **기대값 정정** (Astra finding 7, 2026-09-13).
+   *
+   * 예전 기대: `parsePathParam('36.4713%2C127.1402')`가 좌표를 돌려준다 — 즉 이 함수가
+   * 직접 decode한다. 그 기대가 finding 7의 원인이다. react-router가 경로 세그먼트를
+   * 이미 풀어 `useParams`에 넘기므로 여기서 또 풀면 **두 번 푸는 것**이고,
+   * `/p/%25`가 `%`로 풀린 값을 다시 풀다 `URIError`가 렌더 중에 터져 화면이 비었다.
+   *
+   * 반례: `/p/%25` → 빈 화면 (`MapPage.malformedUrl.test.tsx`에서 재현).
+   *
+   * 사용자가 보는 동작은 그대로다 — `/p/36.47130%2C127.14020`은 여전히 열린다.
+   * 푸는 주체가 라우터로 바뀌었을 뿐이며, 그 경로는 같은 파일의 통합 검사가 지킨다.
+   * 이 함수의 계약은 이제 "**이미 풀린** 문자열을 좌표로 읽는다"이다.
+   */
+  it('이미 풀린 값만 읽는다 — decode는 라우터 몫이다', () => {
+    expect(parsePathParam('36.4713,127.1402')!.lonText).toBe('127.14020')
+    // 안 풀린 채로 들어오면 좌표가 아니다. 여기서 풀어 주지 않는다.
+    expect(parsePathParam('36.4713%2C127.1402')).toBeNull()
+    // 깨진 인코딩도 던지지 않고 null이다. 예전에는 여기서 URIError가 났다.
+    expect(parsePathParam('%')).toBeNull()
+    expect(parsePathParam('36.47130,%ZZ')).toBeNull()
+    expect(parsePathParam('%E0%A4%A')).toBeNull()
   })
 
   it('카카오 (lat, lng) → 내부, 내부 → 카카오 (lat, lng)', () => {

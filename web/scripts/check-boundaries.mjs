@@ -20,6 +20,12 @@
  *      이후 어떤 단계에서도 다시 반올림하지 않는다"). 다른 파일의 `toFixed`는 그
  *      규약을 깨는 가장 흔한 모양이다.
  *
+ *   4. **URL decode는 라우터만 한다.** react-router가 경로 세그먼트를 이미
+ *      `decodeURIComponent`로 풀어 `useParams`에 넘긴다. 앱이 한 번 더 풀면 두 번
+ *      푸는 것이고, `/p/%25`가 `%`로 풀린 뒤 다시 풀리면서 `URIError`가 렌더 중에
+ *      터져 **화면 전체가 비었다**(Astra finding 7). 규칙이 주석으로만 있으면 다음
+ *      사람이 같은 줄을 다시 쓴다.
+ *
  * 실패하면 무엇을 어디서 고쳐야 하는지 말하고 1로 끝낸다.
  */
 
@@ -134,6 +140,17 @@ for await (const file of walk(SRC)) {
         'Point의 lonText·latText를 그대로 쓴다.',
     )
   }
+
+  // 검사 파일은 번들에 실리지 않는다. 라우터가 실제로 푸는지 **확인하려면** 검사
+  // 쪽에서는 인코딩된 값을 다뤄야 하므로 여기서 제외한다.
+  const isTest = /\.test\.tsx?$/.test(where)
+  if (!isTest && /\bdecodeURIComponent\s*\(/.test(text)) {
+    report(
+      file,
+      'URL decode는 라우터가 이미 했다. 한 번 더 풀면 `/p/%25` 같은 주소에서 ' +
+        'URIError가 렌더 중에 터져 화면이 비운다. useParams가 준 값을 그대로 쓴다.',
+    )
+  }
 }
 
 // --- 경계 모듈이 실제로 그 일을 하고 있는가 -------------------------------
@@ -154,5 +171,6 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `경계 검사 통과: 번들 대상 ${shippedCount}개 파일에 REST 키 이름 없음 / SDK·env 격리 / 좌표 반올림 한 곳`,
+  `경계 검사 통과: 번들 대상 ${shippedCount}개 파일에 REST 키 이름 없음 / SDK·env 격리 / ` +
+    '좌표 반올림 한 곳 / URL decode는 라우터만',
 )
