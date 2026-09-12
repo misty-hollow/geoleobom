@@ -25,9 +25,25 @@
  * 키 없이도 빌드와 나머지 화면이 동작해야 한다(CI는 키가 없다). 그래서 키가 없으면
  * `status: 'disabled'`로 두고 검색·결과·비교는 그대로 쓴다. 내려받기에 실패하면
  * `'error'`이며 `retry()`로 다시 시도할 수 있다 — 거절된 프라미스를 캐시에 남기지 않는다.
+ *
+ * ## 지도가 붙는 요소는 **훅이 소유한다**
+ *
+ * 960px 경계에서 화면은 시트 배치와 패널 배치로 갈리고, 그 둘은 서로 다른 JSX 트리라
+ * React가 `<MapView>`가 있던 자리의 DOM을 버리고 새로 만든다. 예전에는 지도가 붙는
+ * 요소가 그 트리에 있었다 — **버려진 요소를 SDK가 계속 붙들고 있어서**, 화면에 새로
+ * 생긴 요소는 비어 있고 지도는 사라졌다(Astra finding 2: DOM children 3 → 0, 모바일로
+ * 돌아와도 복구되지 않음).
+ *
+ * 그래서 이 훅이 요소를 **직접 만들어 마운트 내내 들고 있고**, 화면은 그것을 놓을
+ * 자리만 내준다(`attach`). 자리가 바뀌면 요소를 그 자리로 **옮긴다**(`appendChild`).
+ * DOM 노드를 옮기는 것은 자식과 이벤트 리스너를 그대로 데려가므로 지도 인스턴스가
+ * 그대로 살아 있고, 크기만 `relayout()`으로 다시 잡으면 된다.
+ *
+ * 재연결이 아니라 **분리 자체를 없앤** 것이라, Fable이 정한 반응형 구조(시트 ↔ 패널)는
+ * 한 줄도 바뀌지 않는다.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_CENTER,
   fromKakao,
@@ -69,12 +85,13 @@ export interface MapRoute {
 
 export interface MapController {
   /**
-   * 지도를 붙일 요소. 화면은 이 ref만 달면 된다.
+   * 지도를 놓을 **자리**. 화면은 `ref={map.attach}` 한 줄만 쓴다.
    *
-   * `RefObject<HTMLDivElement | null>`이 아니라 `RefObject<HTMLDivElement>`다. 앞쪽은
-   * 값은 같지만 타입 인자가 공변이라 `ref={...}`에 대입되지 않는다(@types/react 18).
+   * `RefObject`가 아니라 콜백 ref다. 지도가 붙는 요소는 훅이 소유하며(파일 맨 위 주석),
+   * 이 함수는 그 요소를 받은 자리로 옮긴다. 자리가 사라지면 요소는 훅이 계속 들고
+   * 있다가 다음 자리에 다시 놓는다 — 그 사이에도 지도 인스턴스는 살아 있다.
    */
-  containerRef: RefObject<HTMLDivElement>
+  attach: (slot: HTMLDivElement | null) => void
   /**
    * 핀이 **시트 위 가시영역의 세로 중앙**에 오도록 중심을 옮긴다(DESIGN.md 7절).
    * `bottomInset`은 시트가 가린 높이(px). 애니메이션 없이 한 번에 놓는다(17절).
@@ -190,8 +207,26 @@ function destinationImageSource(): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
+/**
+ * 지도가 붙는 요소를 만든다. 자리를 채우기만 하는 빈 상자다.
+ *
+ * 인라인 스타일 두 줄을 여기 두는 이유: 이 요소는 **CSS Module 밖에서** 만들어지므로
+ * 클래스를 줄 수 없다. 자리(`.map`)가 `position: absolute; inset: 0`으로 크기를
+ * 정하고, 이 요소는 그 자리를 가득 채우기만 한다.
+ */
+function createHost(): HTMLDivElement {
+  const host = document.createElement('div')
+  host.style.width = '100%'
+  host.style.height = '100%'
+  // 브라우저 QA가 "카카오 SDK가 그린 것"과 "우리가 그린 것"을 구분하는 표시다.
+  // 44px 터치 타깃 예외를 이 subtree로만 좁히는 데 쓴다(Astra finding 10).
+  host.dataset.kakaoMapHost = ''
+  return host
+}
+
 export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
-  const containerRef = useRef<HTMLDivElement>(null)
+  /** 지도가 붙는 요소. 마운트 내내 **같은 노드**다. */
+  const hostRef = useRef<HTMLDivElement | null>(null)
   const kakaoRef = useRef<KakaoNamespace>(null)
   const mapRef = useRef<KakaoNamespace>(null)
   const pinRef = useRef<KakaoNamespace>(null)
@@ -207,6 +242,22 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
   optionsRef.current = options
   const initialCenterRef = useRef(options.initialCenter ?? DEFAULT_CENTER)
 
+  /**
+   * 화면이 내준 자리에 지도 요소를 놓는다. 자리가 바뀌면 **옮긴다**.
+   *
+   * `appendChild`는 이미 문서 어딘가에 있는 노드를 옮기는 동작이기도 하다. 자식(타일·
+   * 오버레이)과 등록된 리스너가 그대로 따라오므로 지도는 끊기지 않는다. 옮긴 뒤에는
+   * 자리의 크기가 달라졌을 수 있으니 `relayout()`으로 타일 배치를 다시 잡는다.
+   */
+  const attach = useCallback((slot: HTMLDivElement | null) => {
+    if (slot === null) return // 자리가 사라졌다. 요소는 훅이 계속 들고 있는다.
+    const host = hostRef.current ?? (hostRef.current = createHost())
+    if (host.parentElement !== slot) {
+      slot.appendChild(host)
+      mapRef.current?.relayout?.()
+    }
+  }, [])
+
   useEffect(() => {
     if (!JS_KEY) return
     let cancelled = false
@@ -215,15 +266,15 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
     loadSdk(JS_KEY)
       .then((kakao) => {
         if (cancelled) return
-        const container = containerRef.current
-        if (container === null) return
+        const host = hostRef.current
+        if (host === null) return
         if (mapRef.current !== null) {
           setStatus('ready')
           return
         }
         const start = toKakao(initialCenterRef.current)
         kakaoRef.current = kakao
-        const map = new kakao.maps.Map(container, {
+        const map = new kakao.maps.Map(host, {
           center: new kakao.maps.LatLng(start.lat, start.lng),
           level: DEFAULT_LEVEL,
           // 데스크톱: 클릭이 핀이므로 더블클릭 줌이 핀 두 개로 읽히지 않게 한다.
@@ -245,14 +296,18 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
     }
   }, [attempt])
 
-  // 컨테이너 크기가 바뀌면(데스크톱 ↔ 모바일 전환) 타일 배치를 다시 계산한다.
+  // 지도 요소의 크기가 바뀌면(데스크톱 ↔ 모바일 전환) 타일 배치를 다시 계산한다.
+  //
+  // **관찰 대상은 훅이 소유한 요소다.** 화면 트리의 요소를 관찰하면 배치가 바뀔 때마다
+  // 관찰 대상이 사라지고 새로 생겨, 옛 관찰자를 끊는 일을 한 번만 놓쳐도 누수가 된다.
+  // 이 요소는 마운트 내내 같은 노드라 관찰자도 하나로 끝난다.
   useEffect(() => {
-    const container = containerRef.current
-    if (container === null || typeof ResizeObserver === 'undefined') return
+    const host = hostRef.current
+    if (host === null || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
       mapRef.current?.relayout?.()
     })
-    observer.observe(container)
+    observer.observe(host)
     return () => observer.disconnect()
   }, [status])
 
@@ -402,8 +457,8 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
   }, [])
 
   const map = useMemo<MapController>(
-    () => ({ containerRef, centerOn, setPin, setRoute, recenter, zoomBy, retry }),
-    [centerOn, setPin, setRoute, recenter, zoomBy, retry],
+    () => ({ attach, centerOn, setPin, setRoute, recenter, zoomBy, retry }),
+    [attach, centerOn, setPin, setRoute, recenter, zoomBy, retry],
   )
 
   return useMemo(() => ({ status, map }), [status, map])

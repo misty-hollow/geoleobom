@@ -7,6 +7,9 @@
  *   세로 중앙(±8px) → 핀 드래그(좌표 갱신, 지도 불변) → 사용자 팬 유지(다이얼로그·담기·스냅 변경 뒤 재중심 없음) →
  *   /p 직접 진입 3좌표 핀 배치 → 경로선·목적지 마커, canonical snap = route snapped_origin = geometry[0] →
  *   경로선이 시트·상단 검색바에 가리지 않음 → top3 교체 → peek/full 가시영역 → 콘솔 오류. 스크린샷을 남긴다.
+ *   마지막으로 **같은 페이지에서 390 → 1280 → 390 왕복**(roundTrip): 배치가 시트 ↔ 패널로 바뀌어도 지도 요소가
+ *   화면에 붙어 있고 타일·핀·경로선이 남는지. 뷰포트별 새 페이지 QA로는 이것이 잡히지 않는다 — 새 페이지는
+ *   지도를 매번 처음부터 만들기 때문이다(Astra finding 2: resize 뒤 지도 DOM children 3 → 0).
  *   **자동 PASS는 시각 QA의 끝이 아니다** — 스크린샷(타일 위 가독성·핀·선)을 사람이 본다.
  *
  * 준비
@@ -128,6 +131,86 @@ async function waitTiles(page) {
 async function waitAnalysis(page) {
   await page.waitForSelector(`text=${METHOD}`, { timeout: 30000 })
   await page.waitForTimeout(500)
+}
+
+/**
+ * **같은 페이지에서** 960px 경계를 왕복한다 (Astra finding 2의 재현 절차).
+ *
+ * 뷰포트별로 새 페이지를 여는 위쪽 QA로는 이것이 잡히지 않는다 — 새 페이지는 매번
+ * 지도를 처음부터 만들기 때문이다. Astra가 본 것은 390×844에서 1280×800으로 **resize**한
+ * 뒤 지도 DOM children이 3 → 0이 되고, 모바일로 돌아와도 복구되지 않는 것이었다.
+ *
+ * 여기서는 실제 카카오 타일·핀·경로선이 왕복 뒤에도 그대로인지 본다.
+ */
+async function roundTrip(browser) {
+  // isMobile은 컨텍스트 생성 뒤 바꿀 수 없으므로 왕복 검사에서는 쓰지 않는다.
+  // 보려는 것은 터치 입력이 아니라 **배치 전환에서 살아남는 지도**다.
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    deviceScaleFactor: 1,
+    locale: 'ko-KR',
+  })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)))
+
+  await page.goto(`${BASE}/p/${P_ENTRIES[0][1]}`, { waitUntil: 'domcontentloaded' })
+  await waitAnalysis(page)
+  await waitTiles(page)
+
+  // 경로까지 띄워 놓고 왕복한다. 지도 위에 있는 것 전부가 관찰 대상이다.
+  const row = await page.$('#row-convenience')
+  if (row !== null) {
+    await row.click()
+    await page.waitForTimeout(1200)
+  }
+
+  /** 왕복 중 매번 재는 값. 지도가 살아 있다면 전부 그대로여야 한다. */
+  const probe = () => {
+    const app = document.querySelector('[role="application"]')
+    const host = document.querySelector('[data-kakao-map-host]')
+    const imgs = Array.from(app?.querySelectorAll('img') ?? [])
+    return {
+      // 훅이 소유한 요소가 화면에 붙어 있고, 그 안에 SDK가 그린 것이 있는가.
+      hostInDocument: host !== null && document.contains(host),
+      hostIsInsideSlot: host !== null && host.parentElement === app,
+      hostChildren: host ? host.childElementCount : 0,
+      tiles: imgs.filter((i) => i.src.includes('mts.daumcdn.net')).length,
+      pins: imgs.filter((i) => i.src.startsWith('data:image/svg+xml') && Math.round(i.getBoundingClientRect().width) === 32).length,
+      routePaths: Array.from(app?.querySelectorAll('svg path') ?? []).filter((el) => {
+        const r = el.getBoundingClientRect()
+        return r.width + r.height > 0
+      }).length,
+      aside: document.querySelector('aside') !== null,
+      appSize: app ? [Math.round(app.getBoundingClientRect().width), Math.round(app.getBoundingClientRect().height)] : null,
+    }
+  }
+
+  const steps = [
+    ['모바일(첫 진입)', 390, 844, false],
+    ['데스크톱(경계 넘음)', 1280, 800, true],
+    ['모바일(되돌아옴)', 390, 844, false],
+  ]
+  let first = null
+  for (const [label, width, height, wantAside] of steps) {
+    await page.setViewportSize({ width, height })
+    // 배치 전환 + 타일 재요청이 끝날 시간을 준다.
+    await page.waitForTimeout(1500)
+    const s = await page.evaluate(probe)
+    if (first === null) first = s
+    const name = `왕복 ${label}`
+    check(`${name}: 배치가 실제로 바뀌었다(aside=${wantAside})`, s.aside === wantAside, JSON.stringify(s.appSize))
+    check(`${name}: 지도 요소가 화면에 붙어 있다`, s.hostInDocument && s.hostIsInsideSlot, JSON.stringify({ inDoc: s.hostInDocument, inSlot: s.hostIsInsideSlot }))
+    // Astra가 3 → 0으로 본 바로 그 값이다.
+    check(`${name}: 지도 DOM children > 0`, s.hostChildren > 0, `children=${s.hostChildren}`)
+    check(`${name}: 카카오 타일이 그려져 있다`, s.tiles >= 4, `tiles=${s.tiles}`)
+    check(`${name}: 핀이 하나 남아 있다`, s.pins === 1, `pins=${s.pins}`)
+    check(`${name}: 경로선이 남아 있다`, s.routePaths > 0, `paths=${s.routePaths}`)
+    await shot(page, `roundtrip-${width}-${label.replace(/[()]/g, '')}`)
+  }
+  check('왕복: 콘솔·페이지 오류 없음', errors.length === 0, errors.slice(0, 4).join(' | '))
+  await context.close()
 }
 
 async function main() {
@@ -350,6 +433,7 @@ async function main() {
     check(`${vp.name}: 콘솔·페이지 오류·로컬 4xx 없음`, errors.length === 0, errors.slice(0, 4).join(' | '))
     await context.close()
   }
+  await roundTrip(browser)
   await browser.close()
   fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   const fails = report.filter((r) => r.ok === false)

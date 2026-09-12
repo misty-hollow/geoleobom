@@ -24,8 +24,13 @@ export interface MapViewProps {
 export function MapView({ status, map, bottomInset, showZoom, showRecenter, onRecenter }: MapViewProps) {
   return (
     <div className={styles.mapWrap} style={{ ['--sheet-inset' as string]: `${bottomInset}px` }}>
+      {/*
+        지도가 붙는 요소는 **훅이 소유한다**(useKakaoMap 맨 위 주석). 여기 있는 것은
+        그 요소를 놓을 자리이며, 배치가 시트 ↔ 패널로 바뀌어 이 자리가 새로 만들어져도
+        지도 요소는 그대로 옮겨 온다. 자리를 ref로 넘기기만 한다.
+      */}
       <div
-        ref={map.containerRef}
+        ref={map.attach}
         className={styles.map}
         role="application"
         aria-label={ko.map.ariaLabel}

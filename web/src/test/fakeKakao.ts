@@ -33,7 +33,19 @@ export interface FakePolyline extends FakeTarget {
 export interface FakeMap extends FakeTarget {
   center: FakeLatLng
   level: number
+  /** 지도를 만들 때 받은 요소. SDK는 이 요소를 계속 붙들고 산다. */
+  container: HTMLElement
+  relayoutCount: number
 }
+
+/**
+ * 실제 SDK가 컨테이너 안에 만드는 레이어 수(타일·오버레이·컨트롤).
+ *
+ * 가짜가 DOM을 만들지 않으면 **"지도가 사라졌다"를 검사가 볼 수 없다.** Astra
+ * finding 2의 관찰값이 바로 `지도 DOM children 3 → 0`이라, 같은 것을 세려면
+ * 가짜도 자식을 만들어야 한다.
+ */
+export const FAKE_MAP_LAYERS = 3
 
 export interface FakeKakao {
   maps: Record<string, unknown> & {
@@ -151,10 +163,18 @@ export function createFakeKakao(): FakeKakao {
     center: LatLng
     level: number
     container: HTMLElement
+    relayoutCount = 0
     constructor(container: HTMLElement, options: { center: LatLng; level: number }) {
       this.container = container
       this.center = options.center
       this.level = options.level
+      // 실제 SDK처럼 컨테이너 **안에** 레이어를 만든다. 컨테이너가 버려지면
+      // 이 자식들도 함께 화면에서 사라진다 — 그것이 finding 2의 증상이다.
+      for (let index = 0; index < FAKE_MAP_LAYERS; index += 1) {
+        const layer = container.ownerDocument.createElement('div')
+        layer.dataset.fakeKakaoLayer = String(index)
+        container.appendChild(layer)
+      }
       calls.mapCreated += 1
       fake.lastMap = this
     }
@@ -185,7 +205,9 @@ export function createFakeKakao(): FakeKakao {
         coordsFromContainerPoint: (point: Point) => new LatLng(-point.y / 1e5, point.x / 1e5),
       }
     }
-    relayout() {}
+    relayout() {
+      this.relayoutCount += 1
+    }
   }
 
   class Marker implements FakeMarker {

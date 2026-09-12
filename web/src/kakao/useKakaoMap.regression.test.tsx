@@ -67,7 +67,7 @@ describe('useKakaoMap 회귀', () => {
       }, [status, map, A.lonText, A.latText]) // eslint-disable-line react-hooks/exhaustive-deps
       return (
         <Host>
-          <div ref={map.containerRef} data-testid="map" />
+          <div ref={map.attach} data-testid="map" />
           <span>{tick}</span>
         </Host>
       )
@@ -89,7 +89,7 @@ describe('useKakaoMap 회귀', () => {
   it('SDK 내려받기 실패 뒤에 retry()로 다시 시도할 수 있다', async () => {
     uninstallFakeKakao() // 실제 SDK도, 가짜도 없는 상태에서 시작한다.
     const { result } = renderHook(() => useKakaoMap())
-    render(<div ref={result.current.map.containerRef} />)
+    render(<div ref={result.current.map.attach} />)
     await flush()
     const script = document.getElementById('kakao-maps-sdk')
     expect(script).not.toBeNull()
@@ -111,7 +111,7 @@ describe('useKakaoMap 회귀', () => {
 
   it('centerOn(inset)은 핀이 시트 위 가시영역 중앙에 오도록 중심을 아래로 내린다', async () => {
     const { result } = renderHook(() => useKakaoMap())
-    render(<div ref={result.current.map.containerRef} />)
+    render(<div ref={result.current.map.attach} />)
     await flush()
     // 가짜 투영: 1px = 1e-5도, y는 아래로 커진다. inset 300 → 중심은 핀보다 150px 아래
     // = 위도가 0.0015 작다.
@@ -124,7 +124,7 @@ describe('useKakaoMap 회귀', () => {
 
   it('setRoute는 케이싱+선+목적지 점을 그리고 하단 패딩 = inset + 24로 맞춘다', async () => {
     const { result } = renderHook(() => useKakaoMap())
-    render(<div ref={result.current.map.containerRef} />)
+    render(<div ref={result.current.map.attach} />)
     await flush()
     const line: LonLatPair[] = [
       [127.1402, 36.4713],
@@ -154,7 +154,7 @@ describe('useKakaoMap 회귀', () => {
     const onPinDragStart = vi.fn()
     const onPinDragEnd = vi.fn()
     const { result } = renderHook(() => useKakaoMap({ onPinDragStart, onPinDragEnd }))
-    render(<div ref={result.current.map.containerRef} />)
+    render(<div ref={result.current.map.attach} />)
     await flush()
     act(() => result.current.map.setPin({ point: A, kind: 'pending', draggable: true }))
     const marker = fake.markers[0]
@@ -171,7 +171,7 @@ describe('useKakaoMap 회귀', () => {
   it('지도 클릭은 onPinPlace로 정규화된 좌표를 넘긴다', async () => {
     const onPinPlace = vi.fn()
     const { result } = renderHook(() => useKakaoMap({ onPinPlace }))
-    render(<div ref={result.current.map.containerRef} />)
+    render(<div ref={result.current.map.attach} />)
     await flush()
     fake.maps.event.trigger(fake.lastMap!, 'click', { latLng: fake.latLng(36.4713, 127.1402) })
     expect(onPinPlace).toHaveBeenCalledWith(
