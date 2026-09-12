@@ -165,13 +165,29 @@ async function main() {
     })
     check(`${vp.name}: 분 숫자 크기(≤359: 24px, else 28px)`, numFont === (vp.width <= 359 ? '24px' : '28px'), String(numFont))
 
-    // 터치 타깃
+    // 터치 타깃 — **우리가 만든 것만** 잰다.
+    //
+    // 카카오 JS SDK는 지도 안에 자기 저작자 표시 링크를 넣는다(`<a href="http://map.kakao.com/">`,
+    // 32×10). 그 크기·마크업은 SDK가 정하고 약관상 지우거나 키울 수 없으므로 우리 44px 규칙의
+    // 대상이 아니다. `web/.env.local`에 JS 키가 없으면 SDK가 로드되지 않아 이 링크도 없다 —
+    // 그래서 키를 넣기 전 실행에서는 이 검사가 통과했다(2026-09-12 실제 키 투입 후 7 뷰포트 전부 실패).
+    // **우리 요소의 기준을 낮춘 것이 아니라 제3자 요소를 범위에서 뺀 것이다.**
     const small = await page.$$eval('button, a, [role="option"]', (els) =>
       els
         .filter((el) => {
           const r = el.getBoundingClientRect()
           const cs = getComputedStyle(el)
-          return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && !el.closest('[hidden]') && !el.closest('dialog:not([open])')
+          // 호스트명으로 판정한다. href 문자열 정규식은 `evil.com/?x=kakao.` 같은 것에 속는다.
+          let vendor = false
+          if (el.tagName === 'A') {
+            try {
+              const host = new URL(el.href, location.href).hostname
+              vendor = /(^|\.)(kakao\.com|daum\.net|daumcdn\.net)$/.test(host)
+            } catch {
+              vendor = false
+            }
+          }
+          return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && !vendor && !el.closest('[hidden]') && !el.closest('dialog:not([open])')
         })
         .map((el) => {
           const r = el.getBoundingClientRect()
