@@ -255,6 +255,210 @@ def test_malformed_kakao_payload_is_an_upstream_failure_not_a_crash():
         assert client.get("/api/search", params={"q": QUERY}).status_code == 502
 
 
+# --- 스키마가 어긋난 카카오 응답 (Astra finding 6) -------------------------
+#
+# 예전에는 `documents`가 없거나 리스트가 아니면 **빈 결과처럼** 다뤄 `200 []`로 답했다.
+# 사용자에게는 "검색 결과가 없어요"로 보이지만 실제로는 상류가 계약을 어긴 것이다.
+# 둘은 사용자가 할 일이 다르다 — 없으면 다르게 검색하고, 실패면 잠시 뒤 다시 한다.
+#
+# 반대로 일부 잘못된 **행 타입**은 `.strip()`에서 AttributeError가 되어 500까지 갔다.
+# 같은 원인(스키마 미검증)에서 나온 두 얼굴이라 한자리에서 고친다.
+
+
+def test_an_empty_documents_list_is_still_a_normal_empty_result():
+    """대조군. 진짜 빈 결과는 예전 그대로 `200 []`다. 이것까지 실패로 바꾸지 않는다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"documents": []})
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+# 두 갈래 **모두**의 스키마를 어기는 원문. `documents` 수준이 깨졌거나 좌표 타입이
+# 어긋난 것이라 키워드로 읽든 주소로 읽든 쓸 수 없다.
+MALFORMED_FOR_BOTH = [
+    ("documents 없음", {}),
+    ("documents가 객체", {"documents": {"place_name": "공주대"}}),
+    ("documents가 문자열", {"documents": "공주대"}),
+    ("documents가 null", {"documents": None}),
+    ("행이 객체가 아님", {"documents": ["공주대"]}),
+    ("행이 null", {"documents": [None]}),
+    (
+        "address_name이 리스트",
+        {"documents": [{"place_name": "공주대", "address_name": [], "x": "127.1", "y": "36.4"}]},
+    ),
+    (
+        "좌표가 객체",
+        {"documents": [{"place_name": "공주대", "address_name": "충남", "x": {}, "y": {}}]},
+    ),
+]
+
+
+_BOTH_IDS = [p[0] for p in MALFORMED_FOR_BOTH]
+
+
+@pytest.mark.parametrize("label,payload", MALFORMED_FOR_BOTH, ids=_BOTH_IDS)
+def test_malformed_schema_is_an_upstream_failure_not_an_empty_result(label: str, payload: dict):
+    """양쪽 갈래가 모두 스키마를 어기면 상류 실패(502)다. `200 []`도 500도 아니다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 502, f"{label}: {response.status_code}"
+
+
+@pytest.mark.parametrize("label,payload", MALFORMED_FOR_BOTH, ids=_BOTH_IDS)
+def test_one_malformed_branch_does_not_break_the_healthy_one(label: str, payload: dict):
+    """**반례의 핵심**: 한쪽 갈래가 깨져도 멀쩡한 흐름을 통째로 죽이지 않는다.
+
+    예전에는 잘못된 행 타입이 `.strip()`에서 터져 **키워드가 멀쩡해도 500**이 됐다.
+    부분 실패는 이미 계약이 정한 길이 있다 — 성공한 쪽 결과로 답한다(4-4).
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == KAKAO_ADDRESS_PATH:
+            return httpx.Response(200, json=payload)
+        return httpx.Response(200, json=KEYWORD_PAYLOAD)
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 200, f"{label}: {response.status_code}"
+    assert [item["name"] for item in response.json()] == [
+        "공주대학교 신관캠퍼스",
+        "공주대학교 정문",
+    ]
+
+
+# 주소 갈래만 어기는 행: `road_address`가 객체가 아니다.
+_ADDRESS_ROW_WITH_BAD_ROAD = {
+    "address_name": "충남",
+    "road_address": "문자열",
+    "x": "127.1",
+    "y": "36.4",
+}
+# 문자열이 아닌 `place_name` 값들. 전부 truthy라 예전 `or ""`를 그대로 통과했다.
+_BAD_NAMES = [123, ["공주대"], {"v": "공주대"}]
+
+
+# 한쪽 갈래의 스키마만 어기는 원문. 카카오의 두 API는 필드가 다르므로 이런 경우가 있다.
+# 여기서 지키는 것은 "깨진 갈래만 접히고 멀쩡한 갈래는 그대로 나간다"이다.
+
+
+def test_a_keyword_only_schema_break_leaves_the_address_results():
+    """키워드 행의 `place_name` 타입이 어긋났다. 주소 갈래는 그 필드를 읽지 않는다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == KAKAO_KEYWORD_PATH:
+            return httpx.Response(
+                200,
+                json={"documents": [{"place_name": 123, "x": "127.1", "y": "36.4"}]},
+            )
+        return httpx.Response(200, json=ADDRESS_PAYLOAD)
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()] == ["충남 공주시 공주대학로 56"]
+
+
+def test_an_address_only_schema_break_leaves_the_keyword_results():
+    """주소 행의 `road_address`가 객체가 아니다. 키워드 갈래는 그 필드를 읽지 않는다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == KAKAO_ADDRESS_PATH:
+            return httpx.Response(
+                200,
+                json={"documents": [_ADDRESS_ROW_WITH_BAD_ROAD]},
+            )
+        return httpx.Response(200, json=KEYWORD_PAYLOAD)
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()] == [
+        "공주대학교 신관캠퍼스",
+        "공주대학교 정문",
+    ]
+
+
+@pytest.mark.parametrize("bad_name", _BAD_NAMES, ids=["int", "list", "dict"])
+def test_a_bad_keyword_row_does_not_become_an_unexpected_500(bad_name):
+    """Astra가 짚은 다른 얼굴: 잘못된 행 타입이 `.strip()`에서 터져 **500**이 됐다.
+
+    `(document.get("place_name") or "")`는 문자열이 아닌 truthy 값을 그대로 통과시키고
+    바로 다음 `.strip()`이 AttributeError를 던진다. 주소 갈래가 멀쩡해도 요청 전체가
+    처리되지 않은 예외로 끝난다 — 계약에 없는 상태다.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == KAKAO_KEYWORD_PATH:
+            return httpx.Response(
+                200,
+                json={"documents": [{"place_name": bad_name, "x": "127.1", "y": "36.4"}]},
+            )
+        return httpx.Response(200, json=ADDRESS_PAYLOAD)
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code != 500, "처리되지 않은 예외로 끝났다"
+    # 키워드 갈래만 못 쓰게 됐을 뿐이므로 주소 결과로 답한다(4-4 부분 실패).
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()] == ["충남 공주시 공주대학로 56"]
+
+
+def test_a_malformed_row_never_becomes_a_search_result():
+    """잘못된 행이 조용히 **결과 한 줄**이 되어서도 안 된다.
+
+    타입을 확인하지 않으면 `address_name`만 문자열인 쓰레기 행이 정상 결과처럼
+    사용자에게 보인다. 사용자는 그것이 상류 오류였다는 것을 알 길이 없다.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == KAKAO_ADDRESS_PATH:
+            return httpx.Response(
+                200,
+                json={"documents": [_ADDRESS_ROW_WITH_BAD_ROAD]},
+            )
+        return httpx.Response(200, json=KEYWORD_PAYLOAD)
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()] == [
+        "공주대학교 신관캠퍼스",
+        "공주대학교 정문",
+    ]
+
+
+def test_the_kakao_body_never_reaches_the_public_error():
+    """스키마 실패 문구에도 카카오 원문·검색어·키가 들어가지 않는다 (5절)."""
+    secret_in_body = "카카오가 돌려준 원문 " + QUERY
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"documents": secret_in_body, "meta": REST_KEY})
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 502
+    text = response.text
+    assert QUERY not in text
+    assert REST_KEY not in text
+    assert "카카오가 돌려준 원문" not in text
+
+
 # --- 개인정보: 검색어를 남기지 않는다 (v2.4 5절) --------------------------
 
 
