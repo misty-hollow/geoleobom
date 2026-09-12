@@ -120,9 +120,69 @@ def test_snap_failure_is_snap_failed():
 
 
 def test_far_origin_snap_warns_but_continues():
-    out = _run(snap_origin=lambda lon, lat: Snap(lon=lon, lat=lat, snap_distance_m=120.0))
+    """100m `snap_warning`은 **원 입력 → 보고한 스냅 지점**의 거리로 판정한다.
+
+    상류가 준 `snap_distance_m` 숫자가 아니라 좌표에서 다시 잰다 (v2.4 4-3 3단계,
+    2026-09-12 확정 ⓑ). 그래서 여기서는 거리 필드가 아니라 **좌표를 멀리 둔다.**
+    위도 +0.0012도는 약 133m다.
+    """
+    far_lat = LAT + 0.0012
+    out = _run(snap_origin=lambda lon, lat: Snap(lon=lon, lat=far_lat, snap_distance_m=0.0))
+
     assert out.warnings == ("snap_warning",)
     assert out.density.status == "complete"
+    # 보고된 거리는 입력과 보고된 스냅 사이의 실제 거리다. 상류가 0.0을 줬어도 그렇다.
+    assert out.snapped.lat == far_lat
+    assert 130.0 < out.snapped.snap_distance_m < 136.0
+
+
+def test_snap_distance_is_measured_to_the_point_that_is_reported():
+    """상류가 준 거리 숫자를 그대로 싣지 않는다 — 좌표와 거리가 같은 두 점을 가리킨다."""
+    lying = Snap(lon=LON, lat=LAT, snap_distance_m=9_999.0)
+    out = _run(snap_origin=lambda lon, lat: lying)
+
+    # 스냅 지점이 입력과 같으므로 거리는 0이어야 한다. 9,999가 아니다.
+    assert out.snapped.snap_distance_m == pytest.approx(0.0, abs=1e-6)
+    assert out.warnings == ()
+
+
+def test_table_source_becomes_the_analysis_snap_and_its_distance():
+    """`/table`의 `sources[0]`이 분석의 권위 있는 스냅이다 (2026-09-12 확정 ⓑ).
+
+    `/nearest`가 고른 지점은 예비값이라 응답에 실리지 않는다. 거리도 `/table`이 준
+    `sources[0].distance`(우리가 보낸 좌표에서 잰 값)가 아니라 **원 입력에서** 다시 잰다.
+    """
+    preliminary = Snap(lon=LON, lat=LAT, snap_distance_m=3.0)
+    # /table 이 고른 지점은 입력에서 위도 +0.0005도(약 55m) 떨어져 있다.
+    table_lat = LAT + 0.0005
+    table_source = Snap(lon=LON, lat=table_lat, snap_distance_m=1.0, hint="table-hint")
+
+    def run_table(batch: Sequence[Candidate]) -> TableResponse:
+        return _table({c.fid: REACHABLE for c in batch}, source=table_source)
+
+    out = _run(snap_origin=lambda lon, lat: preliminary, run_table=run_table)
+
+    assert (out.snapped.lon, out.snapped.lat) == (LON, table_lat)
+    assert 53.0 < out.snapped.snap_distance_m < 58.0
+    assert out.snapped.snap_distance_m != 1.0  # /table이 준 숫자가 아니다
+    assert out.warnings == ()
+    # `/route`도 같은 하나를 쓴다.
+    assert out.route_context is not None
+    assert out.route_context.origin == out.snapped
+
+
+def test_analysis_snap_falls_back_to_nearest_only_without_a_table_source():
+    """목적지가 하나도 없어 `/table`을 부르지 않으면 예비 스냅으로 물러선다."""
+    preliminary = Snap(lon=LON, lat=LAT + 0.0005, snap_distance_m=3.0)
+    out = _run(
+        snap_origin=lambda lon, lat: preliminary,
+        nearest_candidates={},
+        density_candidates=[],
+    )
+
+    assert (out.snapped.lon, out.snapped.lat) == (preliminary.lon, preliminary.lat)
+    # 물러선 경우에도 거리는 원 입력에서 다시 잰다 — 좌표와 거리가 섞이지 않는다.
+    assert 53.0 < out.snapped.snap_distance_m < 58.0
 
 
 def test_required_table_osrm_error_maps_to_502():

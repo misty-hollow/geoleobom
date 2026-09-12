@@ -369,6 +369,7 @@
         "type": "object"
       },
       "Snapped": {
+        "description": "보행망에 붙은 지점 하나 (v2.4 4-4).\n\n출발지 쪽에서 이 값은 **`/table`이 실제로 출발지로 사용한 지점**이다(2026-09-12 확정).\n`/nearest`의 스냅은 붙을 보행망이 있는지 보고 `/table`에 보낼 좌표를 만드는 **예비값**이며\n응답에 실리지 않는다. 실제 OSRM에서 그 둘은 수십 미터까지 갈라진다 — 보행시간과 거리를\n실제로 잰 출발지가 권위를 가진다. `/api/route`의 `snapped_origin`도 같은 하나다.\n\n`snap_distance_m`은 **`input` 좌표에서 바로 위 `lon`·`lat`까지의 대권거리(m)** 다.\n상류가 실어 보낸 거리 숫자를 그대로 쓰지 않는다 — `/table`의 `sources[0].distance`는\n우리가 보낸 좌표에서 잰 값이라 원 입력 기준이 아니다. 좌표와 거리가 언제나 같은 두 점을\n가리키며, 100m `snap_warning`도 이 값으로 판정한다.",
         "properties": {
           "lat": {
             "title": "Lat",

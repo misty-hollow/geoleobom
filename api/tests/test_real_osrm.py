@@ -18,6 +18,7 @@ import httpx
 import pytest
 
 from app.adapters.osrm import OsrmClient
+from app.analysis.coords import haversine_m
 from app.analysis.models import Candidate, Snap
 from app.contract import MAX_TABLE_DESTINATIONS
 from app.service import same_snap_point
@@ -213,3 +214,25 @@ def test_real_route_without_hints_lands_on_the_same_point(osrm: OsrmClient):
 
     assert same_snap_point(leg.origin, origin)
     assert same_snap_point(leg.dest, dest)
+
+
+def test_real_snap_distance_recomputation_matches_osrm_closely(osrm: OsrmClient):
+    """우리가 다시 잰 스냅 거리가 OSRM이 준 값과 사실상 같은가.
+
+    `snap_distance_m`은 **원 입력 → 보고한 스냅 지점**을 우리 `haversine_m`으로 다시 잰
+    값이다(2026-09-12 확정 ⓑ). `/table`의 `sources[0].distance`는 우리가 보낸 좌표에서
+    잰 값이라 그대로 쓸 수 없기 때문이다.
+
+    그러면 100m `snap_warning` 경계가 상류 숫자와 어긋나지 않는지 확인해 둘 필요가 있다.
+    OSRM과 우리는 구면 반지름이 조금 다르므로 완전히 같지는 않다 — 그 차이가 **경계 판정을
+    바꿀 만큼 커지면** 이 검사가 먼저 깨진다.
+    """
+    snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert snap is not None
+
+    ours = haversine_m(ORIGIN_LON, ORIGIN_LAT, snap.lon, snap.lat)
+    theirs = snap.snap_distance_m
+
+    assert theirs > 0.0, "이 좌표는 스냅이 움직여야 비교가 의미를 가진다"
+    # 0.5% 안. 실측 38.81m vs 38.87m (차이 0.05m).
+    assert abs(ours - theirs) <= max(0.5, theirs * 0.005)

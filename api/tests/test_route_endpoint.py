@@ -409,9 +409,10 @@ def test_route_leaves_from_the_source_table_chose_not_the_nearest_snap(synthetic
         body = response.json()
         assert (body["snapped_origin"]["lon"], body["snapped_origin"]["lat"]) == TABLE_SOURCE_SNAP
 
-        # `/api/analyze`의 `snapped`는 **바꾸지 않았다** — 그것은 계산 의미 변경이라
-        # 별도 결정 대상이다. 지금은 여전히 `/nearest`의 스냅이다.
-        assert (analyze_body["snapped"]["lon"], analyze_body["snapped"]["lat"]) == ORIGIN_SNAP
+        # **`/api/analyze`의 `snapped`와 정확히 같은 하나를 가리킨다** (2026-09-12 확정 ⓑ).
+        # 화면이 보여주는 스냅 지점과 경로가 출발하는 지점이 어긋나지 않는다.
+        assert analyze_body["snapped"] == body["snapped_origin"]
+        assert (analyze_body["snapped"]["lon"], analyze_body["snapped"]["lat"]) != ORIGIN_SNAP
 
 
 def test_route_sends_the_table_source_hint_not_the_nearest_hint(synthetic_gpkg: Path):
