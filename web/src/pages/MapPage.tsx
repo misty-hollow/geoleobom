@@ -7,7 +7,7 @@
  *
  * ## URL이 상태다
  * `/p/{lat},{lng}`가 결과의 진실이다. 핀을 옮기면 즉시 `/`(pending)로 돌아가고 뒤로가기로
- * 복귀한다. 검색명·주소는 라우터 `location.state`에만 잠깐 있다(저장 안 함, [공백 3]).
+ * 복귀한다. 검색명·주소는 **이 컴포넌트의 메모리에만** 잠깐 있다(저장 안 함, [공백 3]).
  *
  * ## 시트 스냅과 경로 상태는 분리한다 (2026-09-12 보정 E)
  * 행 확장·경로 표시가 스냅을 옮기지 않는다. RoutePanel은 시트가 peek일 때만 보이고,
@@ -61,9 +61,16 @@ import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { LiveRegion, Toast, useAnnouncer } from '../ui/Toast'
 
-/** 라우터 state에만 사는 임시 정보. 새로고침·공유 진입에서는 없다. */
+/**
+ * 라우터 state에만 사는 임시 정보. 새로고침·공유 진입에서는 없다.
+ *
+ * **검색 명칭·주소는 여기에 넣지 않는다.** `navigate(path, { state })`의 값은
+ * react-router가 `history.pushState`로 넘기므로 `history.state.usr`에 실려
+ * **새로고침을 넘어 세션 히스토리에 남는다.** v2.4 3절은 "사용자가 선택한 검색 좌표만,
+ * 명칭·주소는 저장 안 함"이므로 그것은 저장이고 금지다(Astra finding 1).
+ * `origin`은 핀에서 왔는지 검색에서 왔는지만 말하는 값이라 사용자 내용이 아니다.
+ */
 interface TransientState {
-  label?: { name: string; address: string }
   origin?: 'pin' | 'search'
 }
 
@@ -72,12 +79,33 @@ function readTransient(state: unknown): TransientState {
   const value = state as Record<string, unknown>
   const out: TransientState = {}
   if (value.origin === 'pin' || value.origin === 'search') out.origin = value.origin
-  const label = value.label
-  if (label !== null && typeof label === 'object') {
-    const { name, address } = label as Record<string, unknown>
-    if (typeof name === 'string') out.label = { name, address: typeof address === 'string' ? address : '' }
-  }
   return out
+}
+
+/** 화면에 잠깐 쓰는 검색 결과 표기. 좌표 키 → 명칭·주소. */
+interface SearchLabel {
+  name: string
+  address: string
+}
+
+/**
+ * 메모리에만 두는 표기 보관함.
+ *
+ * 저장하지 않으면서도 뒤로가기로 같은 지점에 돌아왔을 때 방금 고른 이름을 그대로
+ * 보여주려면 좌표 키로 기억해 둘 곳이 필요하다. `useRef`라 **탭을 닫거나 새로고침하면
+ * 함께 사라진다** — 그것이 규약이 요구하는 수명이다. 한 세션의 검색 횟수만큼 자라지
+ * 않게 상한을 둔다.
+ */
+const MAX_REMEMBERED_LABELS = 8
+
+function rememberLabel(store: Map<string, SearchLabel>, key: string, label: SearchLabel): void {
+  store.delete(key) // 다시 넣어 가장 최근으로 만든다
+  store.set(key, label)
+  while (store.size > MAX_REMEMBERED_LABELS) {
+    const oldest = store.keys().next()
+    if (oldest.done === true) break
+    store.delete(oldest.value)
+  }
 }
 
 export function MapPage() {
@@ -95,6 +123,8 @@ export function MapPage() {
   const fixedRef = useRef<Point | null>(fixed)
   fixedRef.current = fixed
   const transient = readTransient(location.state)
+  // 검색 표기는 메모리에만 둔다(위 주석). 렌더 사이에는 남고 새로고침에는 사라진다.
+  const labelsRef = useRef<Map<string, SearchLabel>>(new Map())
 
   const [pending, setPending] = useState<Point | null>(null)
   // 첫 렌더부터 목적 스냅으로 둔다. 'peek'에서 시작하면 공유 URL 진입마다 peek→half 애니메이션이 보인다(QA 2026-09-12).
@@ -252,7 +282,9 @@ export function MapPage() {
       const point = normalize(result.lon, result.lat)
       if (point === null) return
       setPending(null)
-      const state: TransientState = { label: { name: result.name, address: result.address }, origin: 'search' }
+      // 명칭·주소는 **메모리에만** 넣는다. 라우터 state로 넘기면 history에 남는다.
+      rememberLabel(labelsRef.current, pointKey(point), { name: result.name, address: result.address })
+      const state: TransientState = { origin: 'search' }
       navigate(toPlacePath(point), { replace: isSearch, state })
     },
     [navigate, isSearch],
@@ -331,12 +363,14 @@ export function MapPage() {
   }, [layout, navigate])
 
   // --- 헤더 -----------------------------------------------------------------
+  // 표기는 메모리에서만 찾는다. 새로고침·공유 진입이면 없고, 그때는 좌표로 보여준다.
+  const searchLabel = fixedKey === null ? undefined : labelsRef.current.get(fixedKey)
   const header: ResultHeaderProps | null =
     fixed === null
       ? null
       : {
-          label: transient.label?.name ?? (transient.origin === 'pin' ? ko.header.pickedLabel : ko.header.sharedLabel),
-          secondary: transient.label?.address ? transient.label.address : formatPoint(fixed),
+          label: searchLabel?.name ?? (transient.origin === 'pin' ? ko.header.pickedLabel : ko.header.sharedLabel),
+          secondary: searchLabel?.address ? searchLabel.address : formatPoint(fixed),
           candidateIndex: candidates.indexOf(fixed),
           saved: candidates.has(fixed),
           onSave,
