@@ -55,7 +55,24 @@ DELETED_FIELDS = (
 # 규칙을 덮어쓸 수 있다(같은 필드에 delete 뒤 regexp를 두면 delete가 덮어써진다).
 ALLOWED_FORMAT_LINES = frozenset({"wrap console", f"import {SHARED_SNIPPET}"})
 
-URI_FILTER = 'request>uri regexp "^(/p)/[^?]*|[?].*$" "$1"'
+# **허용 목록 방식이다** (2026-09-13, Astra finding 3). 예전 정규식
+# `^(/p)/[^?]*|[?].*$`는 "민감한 모양을 열거해 지운다"라 열거에 없는 모양이 그대로
+# 남았다. 실제 caddy:2.11.4-alpine으로 재현한 유출:
+#
+#   /%70/36.47130,127.14020   (= /p/... 의 퍼센트 인코딩, Caddy는 같은 요청으로 처리)
+#   /P/36.47130,127.14020
+#   //p/36.47130,127.14020
+#   /assets/../p/36.47130,127.14020
+#   /../../36.47130,127.14020
+#
+# 지금은 아는 경로 템플릿으로 시작할 때만 그것을 남기고 나머지는 통째로 버린다.
+# 기본값이 "남기지 않음"이라 새 모양이 생겨도 새지 않는다. 실제 동작은
+# `deploy/caddy_check.py`가 Caddy를 띄워 확인한다 — 이 파일은 설정 구조만 본다.
+URI_FILTER = (
+    'request>uri regexp "(?s)^(/api/(?:analyze|route|search|health)'
+    "|/assets/[A-Za-z0-9._-]{1,128}|/about|/index[.]html|/favicon[.]svg"
+    '|/search|/c|/p|/)?.*$" "$1"'
+)
 
 # 공유 스니펫 본문에 허용하는 줄. **목록 밖의 줄은 무엇이든 거부한다.**
 # 필드 이름을 따옴표로 감싸거나(`"request>headers>Referer" regexp …`) 다른 스니펫을
@@ -319,3 +336,27 @@ def test_the_snippet_contains_nothing_but_the_expected_filters(caddyfile):
     assert not unexpected, f"스니펫에 예상 밖의 줄: {sorted(unexpected)}"
     missing = ALLOWED_SNIPPET_LINES - lines
     assert not missing, f"스니펫에서 빠진 줄: {sorted(missing)}"
+
+
+# --- 배포 전환 중의 자산 (2026-09-13, Astra finding 9) -------------------------
+
+
+def test_assets_fall_back_to_the_previous_release(caddyfile):
+    """전환 순간에 직전 배포본 자산도 열려야 한다.
+
+    사용자가 A 배포본의 index.html을 받은 **뒤** current가 B로 넘어가면, 그 HTML이
+    가리키는 A의 자산은 B 디렉터리에 없다. current만 보면 404이고 화면이 그 자리에서
+    깨진다. `previous` 링크가 있는 것만으로는 해결되지 않는다 — 찾아보지 않기 때문이다.
+
+    **매처가 자기 root를 들고 있어야 한다.** `root`를 두 줄 쓰고 `not file`이 앞 줄이
+    정한 root를 보게 하는 방식은 caddy 2.11.4에서 두 번 빗나갔다(Caddyfile 주석).
+    실제 동작은 `deploy/caddy_check.py`가 Caddy를 띄워 확인한다.
+    """
+    assets = _block_body(caddyfile, "handle /assets/* {")
+    lines = [line.strip() for line in _code_lines(assets)]
+
+    assert "root * /srv/web/current" in lines, "현재 배포본 root가 없다"
+    assert "root * /srv/web/previous" in lines, "직전 배포본으로 물러설 곳이 없다"
+    # 매처가 자기 root를 명시하는지. 이것이 없으면 순서에 기대는 설정이다.
+    assert "root /srv/web/current" in lines, "file 매처에 root가 명시돼 있지 않다"
+    assert "file {" in lines and "not {" in lines, lines
