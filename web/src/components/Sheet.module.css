@@ -1,0 +1,91 @@
+/* Bottom sheet (DESIGN.md 11절) */
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border-radius: var(--r-4) var(--r-4) 0 0;
+  box-shadow: var(--shadow-2);
+  padding-bottom: var(--safe-bottom);
+  transition: transform var(--dur-snap) var(--ease-snap);
+  will-change: transform;
+  touch-action: none;
+  z-index: 3;
+  max-width: 100%;
+}
+
+.dragging {
+  transition: none;
+}
+
+.probeTop,
+.probeBottom {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.probeTop {
+  height: var(--safe-top);
+}
+
+.probeBottom {
+  height: var(--safe-bottom);
+}
+
+.handleArea {
+  flex: 0 0 24px;
+  /* flex 항목의 min-height:auto가 44px 버튼 크기로 영역을 키우지 않게 한다. 버튼은 위아래로 넘친다. */
+  min-height: 0;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+
+.handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  /* 시각 영역은 24px(handleArea)이지만 탭 타깃은 44px(DESIGN.md 19절). 위아래로 10px씩 넘친다. */
+  height: var(--tap);
+  border-radius: var(--r-2);
+}
+
+.handleBar {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  /* 보정 D: handle 같은 affordance만 대비 강화. ink-300 대신 한 단계 진하게. */
+  background: var(--ink-500);
+  opacity: 0.55;
+}
+
+.header {
+  flex: 0 0 auto;
+}
+
+.content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (min-width: 768px) {
+  .content > * {
+    max-width: var(--w-sheet-content);
+    margin-left: auto;
+    margin-right: auto;
+  }
+}

@@ -1,4 +1,4 @@
-"""배포 스모크 테스트 — 픽스처 5좌표 (v2.3 5절, 10절 게이트 2).
+"""배포 스모크 테스트 — 픽스처 5좌표 + 공개 페이지 (v2.4 5절, 10절 게이트 2).
 
 5절의 데이터 교체 절차가 요구하는 "픽스처 5좌표 스모크 테스트"와, 10절 게이트 2의
 "픽스처 5좌표의 기대값을 기록(이후 회귀 테스트)"을 같은 스크립트로 수행한다.
@@ -356,6 +356,71 @@ def summarise(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# --- 정적 페이지 (v2.4 3절 공유, 4-1) -------------------------------------
+#
+# `/p/{좌표}`는 서버에 그런 파일이 없다. Caddy의 SPA fallback(`try_files`)이 index.html을
+# 돌려줘야 공유 링크를 직접 열거나 새로고침할 때 200이 된다. **설정만 보고 "되겠지"로
+# 넘어가지 않는다** — 실제 응답을 확인한다.
+
+PAGE_MARKER = '<div id="root">'
+
+
+def fetch_page(base_url: str, path: str, timeout_s: float) -> tuple[int, str, str]:
+    """(상태코드, content-type, 본문). 4xx·5xx도 예외로 만들지 않고 그대로 돌려준다."""
+    url = f"{base_url.rstrip('/')}{path}"
+    request = urllib.request.Request(url, headers={"Accept": "text/html"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            return (
+                response.status,
+                response.headers.get("Content-Type", ""),
+                response.read().decode("utf-8", "replace"),
+            )
+    except urllib.error.HTTPError as exc:
+        return (
+            exc.code,
+            exc.headers.get("Content-Type", "") if exc.headers else "",
+            exc.read().decode("utf-8", "replace"),
+        )
+
+
+def check_pages(
+    base_url: str, *, probe_path: str, expect_asset: str | None, timeout_s: float
+) -> list[str]:
+    """`/`와 공유 URL이 실제 React 앱을 200으로 돌려주는지 확인한다."""
+    problems: list[str] = []
+    for path in ("/", probe_path):
+        try:
+            status, content_type, body = fetch_page(base_url, path, timeout_s)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            problems.append(f"{path}: 요청 실패 {exc}")
+            continue
+
+        if status != 200:
+            hint = (
+                " (Caddy SPA fallback이 없으면 여기서 404가 난다)"
+                if path != "/"
+                else ""
+            )
+            problems.append(f"{path}: HTTP {status}{hint}")
+            continue
+        if "text/html" not in content_type:
+            problems.append(f"{path}: content-type이 html이 아니다 ({content_type!r})")
+        if PAGE_MARKER not in body:
+            problems.append(f"{path}: React 진입점({PAGE_MARKER})이 없다")
+        # Week 1 임시 페이지가 아직 서빙되고 있으면 여기서 드러난다.
+        if "<script" not in body:
+            problems.append(
+                f"{path}: 스크립트가 없다. 임시 페이지가 남아 있는지 확인해라"
+            )
+        if expect_asset is not None and expect_asset not in body:
+            problems.append(
+                f"{path}: 이번 빌드의 자산({expect_asset})을 가리키지 않는다. "
+                "옛 배포본이 그대로 서빙되고 있다"
+            )
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="배포 스모크 테스트 (픽스처 5좌표)")
     parser.add_argument("--base-url", required=True)
@@ -377,7 +442,41 @@ def main(argv: list[str] | None = None) -> int:
         help="좌표당 반복 횟수. 2 이상이면 캐시 히트를 확인한다 "
         "(4-4: 캐시 히트는 computed_at을 새 요청 시각으로 바꾸지 않는다)",
     )
+    parser.add_argument(
+        "--pages",
+        action="store_true",
+        help="`/`와 `/p/{좌표}`가 200으로 실제 앱을 돌려주는지 함께 확인한다",
+    )
+    parser.add_argument(
+        "--pages-only",
+        action="store_true",
+        help="API 스모크 없이 페이지 확인만 한다 (deploy_web.sh가 쓴다)",
+    )
+    parser.add_argument(
+        "--probe-path",
+        default="/p/36.47130,127.14020",
+        help="공유 URL 확인에 쓸 경로. 기본값은 픽스처 첫 좌표다",
+    )
+    parser.add_argument(
+        "--expect-asset",
+        help="index.html이 이 자산 이름을 가리켜야 한다 (방금 올린 빌드인지 확인)",
+    )
     args = parser.parse_args(argv)
+
+    if args.pages_only:
+        problems = check_pages(
+            args.base_url,
+            probe_path=args.probe_path,
+            expect_asset=args.expect_asset,
+            timeout_s=args.timeout,
+        )
+        if problems:
+            print("== 페이지 확인 실패 ==", file=sys.stderr)
+            for problem in problems:
+                print(f"  - {problem}", file=sys.stderr)
+            return 1
+        print(f"페이지 확인 통과: / 와 {args.probe_path}")
+        return 0
 
     coords = json.loads(args.coords.read_text(encoding="utf-8"))["coords"]
     baseline = (
@@ -475,6 +574,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"--- 이번 결과 {spot}\n{json.dumps(summary, ensure_ascii=False, indent=2)}"
                 )
+
+    if args.pages:
+        failures.extend(
+            check_pages(
+                args.base_url,
+                probe_path=args.probe_path,
+                expect_asset=args.expect_asset,
+                timeout_s=args.timeout,
+            )
+        )
 
     print(json.dumps(results, ensure_ascii=False, indent=2))
 

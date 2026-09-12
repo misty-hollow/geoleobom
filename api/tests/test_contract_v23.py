@@ -54,7 +54,13 @@ def test_analyze_response_keeps_the_v22_field_set_plus_nothing_new():
 
 
 def test_route_response_still_omits_slope_ref_seconds():
+    """`slope_ref_seconds`는 여전히 없다. `versions`는 v2.4가 더한 필수 필드다.
+
+    이 기대값은 **문서가 먼저 바뀌어서** 정정됐다(v2.4 4-4, 부록 F #1). 검사를 통과시키려
+    고친 것이 아니다. 필드 전체 집합은 test_contract_v24.py가 따로 고정한다.
+    """
     assert set(_schemas()["RouteResponse"]["properties"]) == {
+        "versions",
         "geometry",
         "walk_seconds",
         "walk_m",

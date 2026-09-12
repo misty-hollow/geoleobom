@@ -1,46 +1,33 @@
-import { useEffect, useState } from 'react'
+/**
+ * 라우팅 (v2.4 3절·4-1, UI/UX 설계 v1 D절).
+ *
+ *   `/`              위치 선택(지도 + 시트 peek)
+ *   `/p/{lat},{lng}` 결과 화면이자 **공유 URL**. 직접 접근·새로고침도 같은 경로를 탄다
+ *   `/search`        모바일 검색 오버레이(지도는 뒤에 그대로). 데스크톱은 `/`로 돌려보낸다
+ *   `/c?p=…`         비교
+ *   `/about`         방법론·정책(문안 C)
+ *
+ * 앞의 셋은 **같은 컴포넌트**(MapPage)다. 라우트가 바뀌어도 지도 인스턴스가 살아 있다.
+ *
+ * `/p/*`·`/c`가 서버에서 200으로 열리려면 정적 서버가 SPA fallback을 해야 한다.
+ * `deploy/Caddyfile`의 `try_files`가 그 일을 하고, `deploy/smoke.py`가 배포 뒤 확인한다.
+ */
 
-// v2.2 4-4에는 없는 운영용 엔드포인트. api/app/schemas.py HealthResponse와 같다.
-type Health = {
-  status: string
-  time_model_version: string
-  data_version: string | null
-}
-
-type HealthState = { kind: 'loading' } | { kind: 'ok'; health: Health } | { kind: 'error'; message: string }
+import { Route, Routes } from 'react-router-dom'
+import { AboutPage } from './pages/AboutPage'
+import { ComparePage } from './pages/ComparePage'
+import { MapPage } from './pages/MapPage'
+import { NotFoundPage } from './pages/NotFoundPage'
 
 export default function App() {
-  const [state, setState] = useState<HealthState>({ kind: 'loading' })
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return (await r.json()) as Health
-      })
-      .then((health) => setState({ kind: 'ok', health }))
-      .catch((e: unknown) => setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) }))
-  }, [])
-
   return (
-    <main>
-      <h1>걸어봄</h1>
-      <p>위치 하나를 넣으면 생활시설까지 실제 보행망 기준 예상 도보시간을 보여주는 웹앱. 아직 골격 단계다.</p>
-      <section aria-label="api-health">
-        <h2>API 상태</h2>
-        {state.kind === 'loading' && <p>확인 중…</p>}
-        {state.kind === 'ok' && (
-          <dl>
-            <dt>status</dt>
-            <dd>{state.health.status}</dd>
-            <dt>time_model_version</dt>
-            <dd>{state.health.time_model_version}</dd>
-            <dt>data_version</dt>
-            <dd>{state.health.data_version ?? '없음 (데이터 배포본 미탑재)'}</dd>
-          </dl>
-        )}
-        {state.kind === 'error' && <p>API 연결 실패: {state.message}</p>}
-      </section>
-    </main>
+    <Routes>
+      <Route path="/" element={<MapPage />} />
+      <Route path="/p/:coords" element={<MapPage />} />
+      <Route path="/search" element={<MapPage />} />
+      <Route path="/c" element={<ComparePage />} />
+      <Route path="/about" element={<AboutPage />} />
+      <Route path="*" element={<NotFoundPage />} />
+    </Routes>
   )
 }

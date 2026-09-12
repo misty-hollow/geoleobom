@@ -1,0 +1,637 @@
+{
+  "components": {
+    "schemas": {
+      "AnalyzeResponse": {
+        "properties": {
+          "computed_at": {
+            "description": "실제 분석 계산 시각. UTC aware ISO 8601. 캐시 히트는 원 값을 그대로 돌려준다",
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "density": {
+            "$ref": "#/components/schemas/Density"
+          },
+          "input": {
+            "$ref": "#/components/schemas/InputCoord"
+          },
+          "nearest": {
+            "items": {
+              "$ref": "#/components/schemas/NearestItem"
+            },
+            "title": "Nearest",
+            "type": "array"
+          },
+          "region": {
+            "$ref": "#/components/schemas/Region"
+          },
+          "snapped": {
+            "$ref": "#/components/schemas/Snapped"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/Versions"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "input",
+          "snapped",
+          "region",
+          "versions",
+          "warnings",
+          "nearest",
+          "density",
+          "computed_at"
+        ],
+        "title": "AnalyzeResponse",
+        "type": "object"
+      },
+      "Density": {
+        "properties": {
+          "candidates_checked": {
+            "title": "Candidates Checked",
+            "type": "integer"
+          },
+          "candidates_total": {
+            "title": "Candidates Total",
+            "type": "integer"
+          },
+          "cap": {
+            "title": "Cap",
+            "type": "integer"
+          },
+          "category": {
+            "const": "food_cafe",
+            "title": "Category",
+            "type": "string"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "항상 존재한다. complete면 정수, capped면 cap(20), incomplete면 null",
+            "title": "Count"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "capped",
+              "incomplete"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "status",
+          "count",
+          "cap",
+          "candidates_checked",
+          "candidates_total"
+        ],
+        "title": "Density",
+        "type": "object"
+      },
+      "Facility": {
+        "properties": {
+          "detour_flag": {
+            "title": "Detour Flag",
+            "type": "boolean"
+          },
+          "fid": {
+            "title": "Fid",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "straight_m": {
+            "title": "Straight M",
+            "type": "integer"
+          },
+          "walk_m": {
+            "title": "Walk M",
+            "type": "integer"
+          },
+          "walk_seconds": {
+            "title": "Walk Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fid",
+          "name",
+          "walk_seconds",
+          "walk_m",
+          "straight_m",
+          "detour_flag"
+        ],
+        "title": "Facility",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "data_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "데이터 배포본이 없으면 null",
+            "title": "Data Version"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "time_model_version": {
+            "title": "Time Model Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "time_model_version"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "InputCoord": {
+        "properties": {
+          "lat": {
+            "description": "계산 좌표, 소수 5자리",
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "description": "계산 좌표, 소수 5자리",
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "InputCoord",
+        "type": "object"
+      },
+      "LineString": {
+        "properties": {
+          "coordinates": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Coordinates",
+            "type": "array"
+          },
+          "type": {
+            "default": "LineString",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coordinates"
+        ],
+        "title": "LineString",
+        "type": "object"
+      },
+      "NearestItem": {
+        "properties": {
+          "best": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Facility"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "항상 존재한다. none·unreachable·uncertain(B)에서는 null"
+          },
+          "category": {
+            "enum": [
+              "convenience",
+              "grocery",
+              "pharmacy",
+              "medical",
+              "park"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "uncertain",
+              "unreachable",
+              "none"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "top3": {
+            "description": "항상 존재한다. null이 될 수 없고 비면 []. best가 있으면 top3[0] == best",
+            "items": {
+              "$ref": "#/components/schemas/Facility"
+            },
+            "title": "Top3",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "status",
+          "best",
+          "top3"
+        ],
+        "title": "NearestItem",
+        "type": "object"
+      },
+      "Region": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          },
+          "verified_area": {
+            "title": "Verified Area",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "supported",
+          "label",
+          "verified_area"
+        ],
+        "title": "Region",
+        "type": "object"
+      },
+      "RouteResponse": {
+        "description": "`/api/route` 응답 (v2.4 4-4).\n\n`versions`는 **필수**이며 `AnalyzeResponse.versions`와 같은 모양이다. 프론트는 화면이\n들고 있는 분석의 `versions`와 이 값이 다르면 경로를 그리지 않고 재분석한다(4-5).\n같은 분석에서 값을 가져오므로 정상 경로에서는 항상 같다.\n\n`snapped_origin`·`snapped_dest`는 분석이 실제로 사용한 스냅 지점이다. 그 지점을\n가리키는 OSRM 내부 토큰(hint)은 **응답에 싣지 않는다**(v2.4 4-3 10단계).",
+        "properties": {
+          "geometry": {
+            "$ref": "#/components/schemas/LineString"
+          },
+          "snapped_dest": {
+            "$ref": "#/components/schemas/Snapped"
+          },
+          "snapped_origin": {
+            "$ref": "#/components/schemas/Snapped"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/Versions"
+          },
+          "walk_m": {
+            "title": "Walk M",
+            "type": "integer"
+          },
+          "walk_seconds": {
+            "title": "Walk Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versions",
+          "geometry",
+          "walk_seconds",
+          "walk_m",
+          "snapped_origin",
+          "snapped_dest"
+        ],
+        "title": "RouteResponse",
+        "type": "object"
+      },
+      "SearchResult": {
+        "description": "`/api/search` 결과 한 건 (v2.4 4-4). 카카오 결과의 축약이며 서버에 저장하지 않는다.\n\n좌표는 카카오가 준 값 그대로다. **여기서 5자리로 깎지 않는다** — v2.4 4-2의 \"입력\n시점에 한 번만\" 반올림은 사용자가 결과를 고르는 순간이고, 그 한 곳은\n`web/src/coords.ts`다. 서버가 미리 깎으면 반올림하는 곳이 둘이 된다.",
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "address",
+          "lon",
+          "lat"
+        ],
+        "title": "SearchResult",
+        "type": "object"
+      },
+      "Snapped": {
+        "description": "보행망에 붙은 지점 하나 (v2.4 4-4).\n\n출발지 쪽에서 이 값은 **`/table`이 실제로 출발지로 사용한 지점**이다(2026-09-12 확정).\n`/nearest`의 스냅은 붙을 보행망이 있는지 보고 `/table`에 보낼 좌표를 만드는 **예비값**이며\n응답에 실리지 않는다. 실제 OSRM에서 그 둘은 수십 미터까지 갈라진다 — 보행시간과 거리를\n실제로 잰 출발지가 권위를 가진다. `/api/route`의 `snapped_origin`도 같은 하나다.\n\n`snap_distance_m`은 **`input` 좌표에서 바로 위 `lon`·`lat`까지의 대권거리(m)** 다.\n상류가 실어 보낸 거리 숫자를 그대로 쓰지 않는다 — `/table`의 `sources[0].distance`는\n우리가 보낸 좌표에서 잰 값이라 원 입력 기준이 아니다. 좌표와 거리가 언제나 같은 두 점을\n가리키며, 100m `snap_warning`도 이 값으로 판정한다.",
+        "properties": {
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "snap_distance_m": {
+            "title": "Snap Distance M",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat",
+          "snap_distance_m"
+        ],
+        "title": "Snapped",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Versions": {
+        "properties": {
+          "data_version": {
+            "title": "Data Version",
+            "type": "string"
+          },
+          "poi_date": {
+            "title": "Poi Date",
+            "type": "string"
+          },
+          "time_model_version": {
+            "title": "Time Model Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_version",
+          "time_model_version",
+          "poi_date"
+        ],
+        "title": "Versions",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "걸어봄 API",
+    "version": "0.0.1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/analyze": {
+      "get": {
+        "operationId": "analyze_api_analyze_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "title": "Lat",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/route": {
+      "get": {
+        "description": "선택한 시설 하나의 경로 (v2.4 4-3 10단계, 4-4).\n\n없는 `fid`는 **새 오류 코드를 만들지 않고 404**다. 프론트는 body가 아니라 404를\n보고 재분석한다. 제품 오류 6종은 평소대로 `{code, message}`로 나간다.",
+        "operationId": "route_api_route_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fid",
+            "required": true,
+            "schema": {
+              "title": "Fid",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Route"
+      }
+    },
+    "/api/search": {
+      "get": {
+        "description": "카카오 로컬 검색 프록시 (v2.4 4-4).\n\n**검색어를 서버에 저장하거나 캐시하지 않는다**(4-4, 5절). 실패 처리도 4-4대로다 —\n카카오 timeout은 기존 `TIMEOUT`(504), 그 밖의 카카오 실패는 계약 밖 HTTP 실패(502).\n새 제품 오류 코드를 만들지 않는다.",
+        "operationId": "search_api_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchResult"
+                  },
+                  "title": "Response Search Api Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search"
+      }
+    }
+  }
+}

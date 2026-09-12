@@ -1,0 +1,197 @@
+/* 지도 화면 골격 (UI/UX 설계 v1 D-1, DESIGN.md 7·20절) */
+
+.app {
+  position: relative;
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+/* --- 지도 ------------------------------------------------------------------ */
+
+.mapWrap {
+  position: absolute;
+  inset: 0;
+  --sheet-inset: 0px;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+  background: var(--canvas);
+}
+
+.mapFallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-6);
+  text-align: center;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  pointer-events: none;
+}
+
+.mapFallback > * {
+  pointer-events: auto;
+}
+
+.mapControls {
+  position: absolute;
+  right: var(--s-3);
+  bottom: calc(var(--sheet-inset) + var(--s-3) + var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  z-index: 2;
+}
+
+/* --- 모바일 상단 바 ----------------------------------------------------------- */
+
+.topBar {
+  position: absolute;
+  top: calc(var(--safe-top) + var(--s-3));
+  left: var(--s-3);
+  right: var(--s-3);
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  z-index: 4;
+}
+
+.searchTrigger {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: var(--search-h);
+  padding: 0 var(--s-3);
+  background: var(--paper);
+  border-radius: var(--r-2);
+  /* 보정: 지도 위 검색바 border 최소화 + shadow */
+  border: 1px solid rgba(23, 25, 28, 0.04);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-500);
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.candidatesButton {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: var(--tap);
+  height: var(--tap);
+  padding: 0 var(--s-2);
+  background: var(--paper);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-900);
+  font-size: var(--t-body-s);
+  font-weight: var(--w-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.candidatesButton svg {
+  color: var(--accent-600);
+}
+
+/* --- 데스크톱 2-pane ------------------------------------------------------- */
+
+.desktop {
+  display: grid;
+  grid-template-columns: var(--w-panel) 1fr;
+  height: 100dvh;
+}
+
+.desktop .mapWrap {
+  position: relative;
+  inset: auto;
+  height: 100%;
+}
+
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+  z-index: 3;
+}
+
+.panelSearch {
+  flex: 0 0 auto;
+  padding: var(--pad-x) var(--pad-x) var(--s-3);
+}
+
+.panelBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.panelBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-height: 64px;
+  padding: var(--s-2) var(--pad-x);
+  border-top: 1px solid var(--line);
+}
+
+.panelBarCount {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--tap);
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.panelBarCount svg {
+  color: var(--accent-600);
+}
+
+.panelBarMax {
+  color: var(--ink-500);
+  font-weight: var(--w-400);
+}
+
+.panelHint {
+  padding: var(--s-6) var(--pad-x);
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+}
+
+.panelPending {
+  padding: var(--s-4) var(--pad-x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.panelPendingCoord {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  font-variant-numeric: tabular-nums;
+}

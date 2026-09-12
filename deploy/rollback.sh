@@ -6,6 +6,10 @@
 #
 #   bash deploy/rollback.sh code   — 마지막으로 **스모크를 통과한** 이미지 + 그 커밋의 설정
 #   bash deploy/rollback.sh data   — /srv/geoleobom/data/previous 버전으로 되돌린다
+#   bash deploy/rollback.sh web    — /srv/geoleobom/web/previous 빌드로 되돌린다
+#
+# 셋은 **서로 다른 산출물**이라 따로 되돌린다. 웹만 깨졌는데 API 컨테이너까지 재생성할
+# 이유가 없고, 반대로 API를 되돌릴 때 화면까지 함께 움직이면 무엇을 되돌렸는지 말할 수 없다.
 #
 # 되돌린 뒤 반드시 deploy/smoke.py로 실제 응답을 확인한다. 이 스크립트는 확인하지 않는다.
 # 데이터 롤백은 **삭제하지 않는다.** current 링크만 옮기므로 다시 앞으로 갈 수 있다.
@@ -30,6 +34,8 @@ set -euo pipefail
 HOST="geoleobom"
 REMOTE_DIR="/opt/geoleobom"
 DATA_ROOT="/srv/geoleobom/data"
+WEB_ROOT="/srv/geoleobom/web"
+BASE_URL="https://geoleobom.kr"
 READY_TIMEOUT_S=90
 
 MODE="${1:-}"
@@ -41,7 +47,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	*)
-		echo "usage: $0 <code|data> [--host <ssh-host>]" >&2
+		echo "usage: $0 <code|data|web> [--host <ssh-host>]" >&2
 		exit 2
 		;;
 	esac
@@ -95,8 +101,7 @@ READ
 		trap 'rm -rf "$STAGE_DIR"' EXIT
 		git -C "$REPO_ROOT" archive "$PREV_SHA" deploy | tar -x -C "$STAGE_DIR"
 		scp -q "$STAGE_DIR/deploy/compose.yaml" "$STAGE_DIR/deploy/Caddyfile" "$HOST:$REMOTE_DIR/"
-		scp -q -r "$STAGE_DIR/deploy/site" "$HOST:$REMOTE_DIR/"
-		echo "   커밋 $PREV_SHA 의 deploy/ 복원"
+		echo "   커밋 $PREV_SHA 의 deploy/ 복원 (웹 배포물은 별도다 — rollback.sh web)"
 	fi
 
 	echo "== 3. 이미지 되돌리고 기동"
@@ -263,8 +268,31 @@ fi
 ls -l "$DATA_ROOT/current" "$DATA_ROOT/previous"
 REMOTE
 	;;
+web)
+	# 웹은 버전 디렉터리 + 심볼릭 링크라 **링크만 맞바꾼다.** 어느 쪽도 지우지 않으므로
+	# 다시 앞으로 갈 수 있다(데이터 롤백과 같은 방식).
+	ssh "$HOST" "bash -s" <<REMOTE
+set -euo pipefail
+cd "$WEB_ROOT"
+test -L previous || { echo "previous 링크가 없다. 되돌릴 직전 빌드가 없다."; exit 1; }
+
+PREV="\$(readlink previous)"
+CURR="\$(readlink current)"
+test "\$PREV" != "\$CURR" || { echo "previous와 current가 같다. 되돌릴 곳이 없다."; exit 1; }
+test -f "\$PREV/index.html" || { echo "직전 빌드가 온전하지 않다: \$PREV"; exit 1; }
+
+echo "current=\$CURR -> previous=\$PREV 로 되돌린다"
+ln -sfn "\$CURR" previous
+ln -sfn "\$PREV" current
+ls -l current previous
+REMOTE
+	echo
+	echo "웹을 되돌렸다. 실제 응답을 확인하기 전에는 복구됐다고 하지 않는다:"
+	echo "  python deploy/smoke.py --base-url $BASE_URL --pages-only"
+	exit 0
+	;;
 *)
-	echo "usage: $0 <code|data> [--host <ssh-host>]" >&2
+	echo "usage: $0 <code|data|web> [--host <ssh-host>]" >&2
 	exit 2
 	;;
 esac
