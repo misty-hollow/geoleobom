@@ -66,6 +66,24 @@ class TableResult:
 
 
 @dataclass(frozen=True)
+class TableResponse:
+    """`/table` 한 번의 결과 전체 (v2.4 4-3 5·10단계).
+
+    `source`는 **`/table`이 출발지로 실제 사용한 스냅 지점**(`sources[0]`)이다. 예전
+    파서는 목적지 쪽만 읽고 이것을 버렸는데, 그러면 분석이 어느 지점에서 시간을 쟀는지
+    알 수 없다.
+
+    **`/nearest`의 스냅과 같다고 가정하면 안 된다.** 실제 OSRM에서 둘은 자주 다르다 —
+    `/nearest`는 가장 가까운 phantom node를 그대로 돌려주지만, `/table`·`/route`는
+    경로가 성립하는 연결 요소의 phantom node를 고르기 때문이다. 스모크 5좌표 중 2곳에서
+    24.8m·64.0m 떨어진 지점이 나왔다. `/table`과 `/route`는 서로 일치한다.
+    """
+
+    results: Mapping[int, TableResult]
+    source: Snap | None = None
+
+
+@dataclass(frozen=True)
 class RouteContext:
     """분석이 실제로 사용한 스냅 지점 (v2.4 4-3 10단계).
 

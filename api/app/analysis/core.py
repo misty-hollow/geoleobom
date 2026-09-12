@@ -23,12 +23,13 @@ from app.analysis.models import (
     RegionInfo,
     RouteContext,
     Snap,
+    TableResponse,
     TableResult,
 )
 from app.analysis.nearest import select_nearest
 from app.contract import NEAREST_CATEGORIES, SNAP_WARNING_M
 
-RunTable = Callable[[Sequence[Candidate]], Mapping[int, TableResult]]
+RunTable = Callable[[Sequence[Candidate]], TableResponse]
 SnapOrigin = Callable[[float, float], Snap | None]
 
 
@@ -129,7 +130,19 @@ def analyze(
         density_candidates=density_candidates,
     )
 
-    first_results = required_upstream(lambda: run_table(destinations))
+    first = required_upstream(lambda: run_table(destinations))
+    first_results = first.results
+
+    # **`/route`의 출발지는 `/table`이 실제로 쓴 지점이다** (v2.4 4-3 10단계).
+    #
+    # 10단계 본문은 보존 대상을 "3단계 `/nearest`의 출발지 스냅"이라고 적었지만, 같은
+    # 단계의 확인 조항은 "`/table`이 고른 지점과 같은지"를 요구한다. 실제 OSRM에서 그
+    # 둘은 같지 않다 — `/nearest`는 가장 가까운 phantom node를, `/table`·`/route`는
+    # 경로가 성립하는 연결 요소의 phantom node를 고른다. 시간·거리를 실제로 잰 것은
+    # `/table` 쪽이므로 경로도 그 지점에서 출발해야 한다.
+    #
+    # 응답의 `snapped`(4-4)는 **바꾸지 않는다** — 그것은 계산 의미 변경이라 별도 결정이다.
+    route_origin = first.source or snapped
 
     nearest = tuple(
         select_nearest(
@@ -145,7 +158,7 @@ def analyze(
         candidates=density_candidates,
         first_batch=density_batch,
         first_results=first_results,
-        fetch_batch=run_table,
+        fetch_batch=lambda batch: run_table(batch).results,
         budget_exceeded=budget_exceeded,
     )
 
@@ -161,7 +174,7 @@ def analyze(
         density=density,
         computed_at=now(),
         warnings=warnings,
-        route_context=_route_context(snapped, nearest, first_results),
+        route_context=_route_context(route_origin, nearest, first_results),
     )
     if cache is not None:
         cache.set(key, result)

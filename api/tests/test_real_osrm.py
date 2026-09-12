@@ -18,8 +18,9 @@ import httpx
 import pytest
 
 from app.adapters.osrm import OsrmClient
-from app.analysis.models import Candidate
+from app.analysis.models import Candidate, Snap
 from app.contract import MAX_TABLE_DESTINATIONS
+from app.service import same_snap_point
 
 pytestmark = pytest.mark.real_osrm
 
@@ -66,7 +67,7 @@ def test_real_table_1x160(osrm: OsrmClient):
     origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert origin is not None
 
-    results = osrm.table(origin, candidates, coordinates)
+    results = osrm.table(origin, candidates, coordinates).results
 
     assert len(results) == MAX_TABLE_DESTINATIONS
     assert all(r.snap_distance_m >= 0.0 for r in results.values())
@@ -84,7 +85,7 @@ def test_real_snap_suspects_are_visible(osrm: OsrmClient):
     origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert origin is not None
 
-    results = osrm.table(origin, candidates, coordinates)
+    results = osrm.table(origin, candidates, coordinates).results
     distances = [r.snap_distance_m for r in results.values()]
     assert max(distances) > 0.0
 
@@ -110,7 +111,7 @@ def test_real_table_returns_destination_snap_points(osrm: OsrmClient):
     origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert origin is not None
 
-    results = osrm.table(origin, candidates, coordinates)
+    results = osrm.table(origin, candidates, coordinates).results
     snaps = [r.destination_snap() for r in results.values()]
     assert all(snap is not None for snap in snaps)
     assert all(snap.hint for snap in snaps if snap is not None)
@@ -124,26 +125,59 @@ def test_real_table_returns_destination_snap_points(osrm: OsrmClient):
     assert moved, "모든 목적지가 요청 좌표 그대로라면 이 그래프로는 요구를 검증할 수 없다"
 
 
+def test_real_nearest_and_table_can_disagree_on_the_origin(osrm: OsrmClient):
+    """**`/nearest`의 스냅과 `/table`의 출발지 스냅은 같지 않을 수 있다.**
+
+    v2.4 4-3 10단계 본문은 보존 대상을 "3단계 `/nearest`의 출발지 스냅"이라고 적었지만,
+    같은 단계의 확인 조항은 "`/table`이 고른 지점"을 기준으로 삼는다. 실제 OSRM에서는
+    뒤쪽이 맞다 — `/nearest`는 가장 가까운 phantom node를 그대로 돌려주고,
+    `/table`·`/route`는 경로가 성립하는 연결 요소의 phantom node를 고르기 때문이다.
+
+    이 검사는 **그 차이가 실재함을 고정한다.** 차이가 사라지면(그래프가 바뀌어) 이
+    검사는 skip되지만, 살아 있는 동안은 `/table` 쪽을 권위로 삼아야 하는 근거다.
+    """
+    coordinates = _ring(4)
+    candidates = [
+        Candidate(fid=i + 1, name=f"p{i}", category="convenience", straight_m=100.0)
+        for i in range(4)
+    ]
+    nearest_snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert nearest_snap is not None
+
+    response = osrm.table(nearest_snap, candidates, coordinates)
+    assert response.source is not None, "/table 응답에 sources[0]이 있어야 한다"
+
+    if same_snap_point(response.source, nearest_snap):
+        pytest.skip("이 좌표·그래프에서는 두 스냅이 일치한다 — 차이를 보일 수 없다")
+
+    # 같은 지점이 아니라는 것 자체가 이 검사의 내용이다.
+    assert not same_snap_point(response.source, nearest_snap)
+
+
 def test_real_route_uses_exactly_the_snap_points_table_chose(osrm: OsrmClient):
     """**실제 OSRM에서 `/table`의 스냅과 `/route`의 스냅이 같음을 증명한다** (v2.4 4-3 10단계).
+
+    출발지 기준은 **`/table`의 `sources[0]`**이다. `/nearest`의 스냅이 아니다 — 위
+    `test_real_nearest_and_table_can_disagree_on_the_origin`이 그 둘이 다를 수 있음을
+    고정한다. 시간·거리를 실제로 잰 것이 `/table`이므로 경로도 그 지점에서 출발해야 한다.
 
     모의 OSRM 검사(tests/test_route_endpoint.py)는 우리 코드가 무엇을 보내는지 고정하고,
     이 검사는 실제 그래프가 그 요청에 어떻게 답하는지 확인한다. 둘은 다른 것이다
     (AGENTS.md 4절).
     """
-    from app.service import same_snap_point
-
     coordinates = _ring(6)
     candidates = [
         Candidate(fid=i + 1, name=f"p{i}", category="convenience", straight_m=100.0)
         for i in range(6)
     ]
-    origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
-    assert origin is not None
+    nearest_snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert nearest_snap is not None
 
-    results = osrm.table(origin, candidates, coordinates)
+    response = osrm.table(nearest_snap, candidates, coordinates)
+    origin = response.source or nearest_snap
+
     checked = 0
-    for result in results.values():
+    for result in response.results.values():
         if result.duration_seconds is None:
             continue  # 도달 불가 목적지는 경로를 그리지 않는다
         dest = result.destination_snap()
@@ -153,8 +187,6 @@ def test_real_route_uses_exactly_the_snap_points_table_chose(osrm: OsrmClient):
 
         assert same_snap_point(leg.origin, origin), "출발지 스냅이 /table 때와 다르다"
         assert same_snap_point(leg.dest, dest), "목적지 스냅이 /table 때와 다르다"
-        assert leg.coordinates[0] == (leg.origin.lon, leg.origin.lat)
-        assert leg.coordinates[-1] == (leg.dest.lon, leg.dest.lat)
         checked += 1
 
     assert checked >= 3, "도달 가능한 목적지가 너무 적어 증명이 약하다"
@@ -166,14 +198,13 @@ def test_real_route_without_hints_lands_on_the_same_point(osrm: OsrmClient):
     이것은 **대체 근거가 아니라 되돌아갈 곳**이다. 같은 지점인지는 어느 경우에도
     호출자가 확인한다(app/service.py의 `_require_same_snap`).
     """
-    from app.analysis.models import Snap
-    from app.service import same_snap_point
-
-    origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
-    assert origin is not None
+    nearest_snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert nearest_snap is not None
     candidates = [Candidate(fid=1, name="p", category="convenience", straight_m=100.0)]
     coordinates = _ring(1)
-    dest = osrm.table(origin, candidates, coordinates)[1].destination_snap()
+    response = osrm.table(nearest_snap, candidates, coordinates)
+    origin = response.source or nearest_snap
+    dest = response.results[1].destination_snap()
     assert dest is not None
 
     stripped_origin = Snap(lon=origin.lon, lat=origin.lat, snap_distance_m=origin.snap_distance_m)

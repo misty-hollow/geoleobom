@@ -36,6 +36,10 @@ ORIGIN_SNAP = (127.140777, 36.471888)
 # 목적지 스냅. `/table`이 이 값을 돌려주고 `/route`는 이 값을 써야 한다.
 DEST_SNAP = (127.143333, 36.474444)
 ORIGIN_HINT = "origin-hint-token"
+# `/table`이 고른 출발지 스냅. **`/nearest`의 ORIGIN_SNAP과 다르다** — 실제 OSRM에서
+# 그 둘이 갈라지기 때문이다(tests/test_real_osrm.py 참고).
+TABLE_SOURCE_SNAP = (127.141234, 36.472345)
+TABLE_SOURCE_HINT = "table-source-hint-token"
 DEST_HINT = "dest-hint-token"
 
 ROUTE_GEOMETRY = [list(ORIGIN_SNAP), [127.1420, 36.4730], list(DEST_SNAP)]
@@ -58,9 +62,18 @@ def _settings(gpkg: Path) -> Settings:
 class _Osrm:
     """모의 OSRM. 받은 `/route` 요청을 기록해 검사가 들여다본다."""
 
-    def __init__(self, *, route_waypoints=None, reject_hints: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        route_waypoints=None,
+        reject_hints: bool = False,
+        table_source: tuple[float, float] | None = None,
+    ) -> None:
         self.route_requests: list[httpx.Request] = []
         self._reject_hints = reject_hints
+        # `/table` 응답의 `sources[0]`. None이면 그 필드를 아예 넣지 않아
+        # 예전 OSRM 응답 모양(= core가 `/nearest` 스냅으로 물러서는 경로)을 흉내 낸다.
+        self._table_source = table_source
         # 기본값: OSRM이 요청받은 그 지점을 그대로 썼다고 답한다.
         self._route_waypoints = route_waypoints or [
             {"location": list(ORIGIN_SNAP), "distance": 3.0, "hint": ORIGIN_HINT},
@@ -85,20 +98,24 @@ class _Osrm:
             )
         if path.startswith("/table"):
             count = path.rstrip("/").count(";")
-            return httpx.Response(
-                200,
-                json={
-                    "code": "Ok",
-                    "durations": [[360.0] * count],
-                    "distances": [[468.0] * count],
-                    # 모든 목적지가 같은 지점에 붙었다고 답한다. 검사는 "원좌표가
-                    # 아니라 이 값이 `/route`로 갔는가"만 본다.
-                    "destinations": [
-                        {"location": list(DEST_SNAP), "distance": 6.0, "hint": DEST_HINT}
-                    ]
-                    * count,
-                },
-            )
+            body = {
+                "code": "Ok",
+                "durations": [[360.0] * count],
+                "distances": [[468.0] * count],
+                # 모든 목적지가 같은 지점에 붙었다고 답한다. 검사는 "원좌표가
+                # 아니라 이 값이 `/route`로 갔는가"만 본다.
+                "destinations": [{"location": list(DEST_SNAP), "distance": 6.0, "hint": DEST_HINT}]
+                * count,
+            }
+            if self._table_source is not None:
+                body["sources"] = [
+                    {
+                        "location": list(self._table_source),
+                        "distance": 21.0,
+                        "hint": TABLE_SOURCE_HINT,
+                    }
+                ]
+            return httpx.Response(200, json=body)
         assert path.startswith("/route")
         self.route_requests.append(request)
         if self._reject_hints and "hints" in parse_qs(request.url.query.decode()):
@@ -353,3 +370,63 @@ def test_route_after_cache_hit_still_has_the_snap_context(client: TestClient, os
     )
     origin, dest = _route_coordinates(osrm.route_requests[-1])
     assert (origin, dest) == (pytest.approx(ORIGIN_SNAP), pytest.approx(DEST_SNAP))
+
+
+# --- 회귀: `/table`의 출발지 스냅이 `/nearest`의 것과 다를 때 -----------------
+
+
+def test_route_leaves_from_the_source_table_chose_not_the_nearest_snap(synthetic_gpkg: Path):
+    """**출발지 권위는 `/table`의 `sources[0]`다** (v2.4 4-3 10단계).
+
+    실제 OSRM에서 `/nearest`와 `/table`은 출발지 스냅이 갈린다 — `/nearest`는 가장 가까운
+    phantom node를, `/table`·`/route`는 경로가 성립하는 연결 요소의 phantom node를 고른다.
+    실데이터·실 OSRM에서 스모크 5좌표 중 2곳이 24.8m·64.0m 어긋났고, 그 좌표에서는
+    `/api/route`가 전부 502(`OSRM_ERROR` 스냅 불일치)로 끝났다.
+
+    예전 모의 OSRM은 `/table` 응답에 `sources`를 아예 넣지 않아 이 갈림을 재현하지
+    못했다. 여기서는 넣는다 — `/route`는 `ORIGIN_SNAP`이 아니라 `TABLE_SOURCE_SNAP`에서
+    출발해야 한다.
+    """
+    osrm = _Osrm(
+        table_source=TABLE_SOURCE_SNAP,
+        route_waypoints=[
+            {"location": list(TABLE_SOURCE_SNAP), "distance": 21.0, "hint": TABLE_SOURCE_HINT},
+            {"location": list(DEST_SNAP), "distance": 6.0, "hint": DEST_HINT},
+        ],
+    )
+    with _client(synthetic_gpkg, osrm) as client:
+        fid, analyze_body = _a_best_fid(client)
+        response = client.get(
+            "/api/route", params={"lon": CENTER_LON, "lat": CENTER_LAT, "fid": fid}
+        )
+
+        assert response.status_code == 200, response.json()
+        sent = _route_coordinates(osrm.route_requests[-1])
+        assert sent[0] == TABLE_SOURCE_SNAP, "출발지는 /table이 고른 지점이어야 한다"
+        assert sent[0] != ORIGIN_SNAP, "/nearest의 스냅으로 나가면 실제 OSRM에서 502가 된다"
+        assert sent[1] == DEST_SNAP
+
+        body = response.json()
+        assert (body["snapped_origin"]["lon"], body["snapped_origin"]["lat"]) == TABLE_SOURCE_SNAP
+
+        # `/api/analyze`의 `snapped`는 **바꾸지 않았다** — 그것은 계산 의미 변경이라
+        # 별도 결정 대상이다. 지금은 여전히 `/nearest`의 스냅이다.
+        assert (analyze_body["snapped"]["lon"], analyze_body["snapped"]["lat"]) == ORIGIN_SNAP
+
+
+def test_route_sends_the_table_source_hint_not_the_nearest_hint(synthetic_gpkg: Path):
+    """hint도 `/table`이 준 것을 되돌려준다. 두 지점의 hint는 서로 다른 토큰이다."""
+    osrm = _Osrm(
+        table_source=TABLE_SOURCE_SNAP,
+        route_waypoints=[
+            {"location": list(TABLE_SOURCE_SNAP), "distance": 21.0, "hint": TABLE_SOURCE_HINT},
+            {"location": list(DEST_SNAP), "distance": 6.0, "hint": DEST_HINT},
+        ],
+    )
+    with _client(synthetic_gpkg, osrm) as client:
+        fid, _ = _a_best_fid(client)
+        client.get("/api/route", params={"lon": CENTER_LON, "lat": CENTER_LAT, "fid": fid})
+
+        hints = parse_qs(osrm.route_requests[-1].url.query.decode())["hints"][0]
+        assert hints == f"{TABLE_SOURCE_HINT};{DEST_HINT}"
+        assert ORIGIN_HINT not in hints

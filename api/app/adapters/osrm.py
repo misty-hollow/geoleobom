@@ -46,7 +46,7 @@ from collections.abc import Sequence
 import httpx
 
 from app.analysis.errors import OsrmRefused, OsrmUnavailable, UpstreamTimeout
-from app.analysis.models import Candidate, RouteLeg, Snap, TableResult
+from app.analysis.models import Candidate, RouteLeg, Snap, TableResponse, TableResult
 from app.contract import MAX_TABLE_DESTINATIONS
 
 DEFAULT_TIMEOUT_S = 4.0
@@ -133,12 +133,16 @@ class OsrmClient:
         origin: Snap,
         destinations: Sequence[Candidate],
         coordinates: Sequence[tuple[float, float]],
-    ) -> dict[int, TableResult]:
-        """1×N `/table`. coordinates는 destinations와 같은 순서의 [lon, lat] 목록이다."""
+    ) -> TableResponse:
+        """1×N `/table`. coordinates는 destinations와 같은 순서의 [lon, lat] 목록이다.
+
+        응답의 `sources[0]`도 함께 돌려준다 — **`/table`이 실제로 출발한 지점**이며,
+        `/nearest`가 고른 지점과 다를 수 있다(`TableResponse` 참고).
+        """
         if len(destinations) != len(coordinates):
             raise ValueError("destinations와 coordinates 길이가 다르다")
         if not destinations:
-            return {}
+            return TableResponse(results={}, source=None)
         if len(destinations) > MAX_TABLE_DESTINATIONS:
             # 가드는 계산 core가 먼저 건다. 여기 도달하면 버그다.
             raise ValueError(f"목적지 {len(destinations)} > {MAX_TABLE_DESTINATIONS}")
@@ -184,10 +188,14 @@ class OsrmClient:
         return _parse_route(payload)
 
     @staticmethod
-    def _parse_table(payload: dict, destinations: Sequence[Candidate]) -> dict[int, TableResult]:
+    def _parse_table(payload: dict, destinations: Sequence[Candidate]) -> TableResponse:
         durations = (payload.get("durations") or [[]])[0]
         distances = (payload.get("distances") or [[]])[0]
         snapped = payload.get("destinations") or []
+        sources = payload.get("sources") or []
+        # `/table`이 실제로 출발한 지점. 없으면 None이고 호출자가 `/nearest` 스냅으로
+        # 물러선다 — 지어내지 않는다.
+        source = _waypoint_snap(sources[0]) if sources else None
         if len(durations) != len(destinations):
             raise OsrmUnavailable(f"durations 길이 {len(durations)} != 목적지 {len(destinations)}")
 
@@ -206,7 +214,7 @@ class OsrmClient:
                 snap_lat=snap_lat,
                 snap_hint=_waypoint_hint(waypoint),
             )
-        return results
+        return TableResponse(results=results, source=source)
 
 
 def _waypoint_location(waypoint: dict) -> tuple[float | None, float | None]:

@@ -48,7 +48,7 @@ def test_table_request_follows_the_contract():
             },
         )
 
-    results = _client(handler).table(ORIGIN, _candidates(3), _coords(3))
+    results = _client(handler).table(ORIGIN, _candidates(3), _coords(3)).results
 
     assert "sources=0" in seen["query"]
     assert "destinations=1%3B2%3B3" in seen["query"] or "destinations=1;2;3" in seen["query"]
@@ -80,7 +80,7 @@ def test_table_keeps_null_durations_as_unreachable():
             },
         )
 
-    results = _client(handler).table(ORIGIN, _candidates(2), _coords(2))
+    results = _client(handler).table(ORIGIN, _candidates(2), _coords(2)).results
     assert results[1].duration_seconds is None
     assert results[2].duration_seconds == 450.0
 
@@ -97,7 +97,9 @@ def test_empty_destinations_does_not_call_osrm():
     def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
         raise AssertionError("목적지가 없으면 부르지 않는다")
 
-    assert _client(handler).table(ORIGIN, [], []) == {}
+    empty = _client(handler).table(ORIGIN, [], [])
+    assert empty.results == {}
+    assert empty.source is None
 
 
 def test_nearest_returns_snap_with_distance():

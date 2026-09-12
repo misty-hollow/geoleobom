@@ -32,7 +32,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -50,7 +50,7 @@ from app.analysis.models import (
     RouteLeg,
     RouteResult,
     Snap,
-    TableResult,
+    TableResponse,
 )
 from app.analysis.time_model import display_seconds, service_seconds
 from app.contract import (
@@ -59,7 +59,8 @@ from app.contract import (
     NEAREST_CATEGORIES,
     NEAREST_RADIUS_M,
     NEAREST_TOP_N,
-    ROUTE_SNAP_EPSILON_DEG,
+    OSRM_COORD_SCALE,
+    ROUTE_SNAP_EPSILON_TICKS,
 )
 from app.region import REGION_LABEL, UNSUPPORTED_LABEL, load_region
 from app.request_log import RequestMetrics
@@ -228,7 +229,7 @@ class AnalysisService:
                 snap_holder.append(snapped)
             return snapped
 
-        def run_table(batch: Sequence[Candidate]) -> Mapping[int, TableResult]:
+        def run_table(batch: Sequence[Candidate]) -> TableResponse:
             if not snap_holder:
                 raise RuntimeError("스냅 전에 /table을 부를 수 없다")
             # 5절이 허용한 "목적지 수·배치 수"는 여기서만 센다. 좌표는 세지 않는다.
@@ -293,15 +294,23 @@ class AnalysisService:
             coordinates[fid] = (plon, plat)
 
 
+def _ticks(degrees: float) -> int:
+    """좌표를 OSRM의 고정소수점 눈금(1e-6도) 정수로 바꾼다."""
+    return round(degrees * OSRM_COORD_SCALE)
+
+
 def same_snap_point(left: Snap, right: Snap) -> bool:
     """두 스냅이 같은 지점인가 (v2.4 4-3 10단계).
 
     OSRM은 좌표를 1e-6도 고정소수점으로 들고 있으므로 같은 phantom node면 같은 값이
     나온다. 여유를 그 한 눈금으로 두어 확인이 공허해지지 않게 한다.
+
+    **비교는 도(度) 실수가 아니라 눈금 정수로 한다.** 실수로 빼면 한 눈금 차이가
+    이진 표현 오차 때문에 1e-6보다 커지는 좌표가 있다(contract.py의 재현 사례).
     """
     return (
-        abs(left.lon - right.lon) <= ROUTE_SNAP_EPSILON_DEG
-        and abs(left.lat - right.lat) <= ROUTE_SNAP_EPSILON_DEG
+        abs(_ticks(left.lon) - _ticks(right.lon)) <= ROUTE_SNAP_EPSILON_TICKS
+        and abs(_ticks(left.lat) - _ticks(right.lat)) <= ROUTE_SNAP_EPSILON_TICKS
     )
 
 

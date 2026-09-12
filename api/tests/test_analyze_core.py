@@ -16,7 +16,7 @@ import pytest
 from app.analysis.cache import AnalyzeCache
 from app.analysis.core import analyze
 from app.analysis.errors import OsrmUnavailable, ProductError, UpstreamTimeout
-from app.analysis.models import Candidate, RegionInfo, Snap, TableResult
+from app.analysis.models import Candidate, RegionInfo, Snap, TableResponse, TableResult
 
 DATA_VERSION = "2026Q3-cc-01"
 TIME_MODEL_VERSION = "tm1"
@@ -53,8 +53,13 @@ def _density(count: int, start: int = 500) -> list[Candidate]:
     ]
 
 
-def _all_reachable(batch: Sequence[Candidate]) -> dict[int, TableResult]:
-    return {c.fid: REACHABLE for c in batch}
+def _table(results: dict[int, TableResult], source: Snap | None = None) -> TableResponse:
+    """모의 `/table` 응답. `source`를 주지 않으면 core가 `/nearest` 스냅으로 물러선다."""
+    return TableResponse(results=results, source=source)
+
+
+def _all_reachable(batch: Sequence[Candidate]) -> TableResponse:
+    return _table({c.fid: REACHABLE for c in batch})
 
 
 def _fixed_clock(moment: datetime):
@@ -97,7 +102,7 @@ def test_happy_path_shapes():
 
 
 def test_out_of_region_is_rejected_before_any_upstream_call():
-    def boom(batch: Sequence[Candidate]) -> dict[int, TableResult]:
+    def boom(batch: Sequence[Candidate]) -> TableResponse:
         raise AssertionError("지역 밖이면 상류를 부르지 않는다")
 
     outside = RegionInfo(supported=False, label="지원 밖", verified_area=False)
@@ -121,7 +126,7 @@ def test_far_origin_snap_warns_but_continues():
 
 
 def test_required_table_osrm_error_maps_to_502():
-    def fail(batch: Sequence[Candidate]) -> dict[int, TableResult]:
+    def fail(batch: Sequence[Candidate]) -> TableResponse:
         raise OsrmUnavailable("first table down")
 
     with pytest.raises(ProductError) as excinfo:
@@ -131,7 +136,7 @@ def test_required_table_osrm_error_maps_to_502():
 
 
 def test_required_table_timeout_maps_to_504():
-    def fail(batch: Sequence[Candidate]) -> dict[int, TableResult]:
+    def fail(batch: Sequence[Candidate]) -> TableResponse:
         raise UpstreamTimeout("first table timeout")
 
     with pytest.raises(ProductError) as excinfo:
@@ -145,11 +150,11 @@ def test_extra_batch_failure_keeps_the_response(failure: type[Exception]):
     """같은 OSRM 오류라도 필수 호출과 추가 배치의 결과가 다르다 (v2.3 4-4 경계)."""
     calls = {"n": 0}
 
-    def first_ok_then_fail(batch: Sequence[Candidate]) -> dict[int, TableResult]:
+    def first_ok_then_fail(batch: Sequence[Candidate]) -> TableResponse:
         calls["n"] += 1
         if calls["n"] == 1:
             # 밀도 후보(fid >= 500)는 10분 밖이라 cap에 걸리지 않고 추가 배치로 넘어간다.
-            return {c.fid: (BEYOND_TEN_MIN if c.fid >= 500 else REACHABLE) for c in batch}
+            return _table({c.fid: (BEYOND_TEN_MIN if c.fid >= 500 else REACHABLE) for c in batch})
         raise failure("extra batch down")
 
     out = _run(density_candidates=_density(70), run_table=first_ok_then_fail)
@@ -167,7 +172,7 @@ def test_cache_hit_returns_the_original_computed_at_without_calling_upstream():
     first_moment = datetime(2026, 9, 11, 3, 11, 23, tzinfo=UTC)
     first = _run(cache=cache, now=_fixed_clock(first_moment))
 
-    def boom(batch: Sequence[Candidate]) -> dict[int, TableResult]:
+    def boom(batch: Sequence[Candidate]) -> TableResponse:
         raise AssertionError("캐시 히트에서는 상류를 부르지 않는다")
 
     second = _run(
@@ -191,7 +196,7 @@ def test_neighbouring_five_digit_inputs_are_computed_separately():
 def test_first_table_receives_deduped_destinations_within_the_guard():
     seen: list[int] = []
 
-    def capture(batch: Sequence[Candidate]) -> dict[int, TableResult]:
+    def capture(batch: Sequence[Candidate]) -> TableResponse:
         seen.append(len(batch))
         fids = [c.fid for c in batch]
         assert len(fids) == len(set(fids))

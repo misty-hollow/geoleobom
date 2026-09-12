@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.analysis.errors import ERROR_HTTP_STATUS, KakaoUnavailable, RouteFidNotFound
 from app.analysis.models import RouteContext, Snap, TableResult
-from app.contract import ERROR_CODES, ROUTE_SNAP_EPSILON_DEG
+from app.contract import ERROR_CODES, OSRM_COORD_SCALE, ROUTE_SNAP_EPSILON_TICKS
 from app.main import app
 from app.schemas import RouteResponse, Versions
 from app.service import same_snap_point
@@ -104,7 +104,8 @@ def test_a_table_result_without_a_snap_point_is_not_routable():
 
 def test_snap_match_tolerance_is_one_osrm_unit():
     """여유를 넓히면 확인이 공허해진다. OSRM 좌표 정밀도 한 눈금(1e-6도)이다."""
-    assert ROUTE_SNAP_EPSILON_DEG == 1e-6
+    assert OSRM_COORD_SCALE == 1_000_000
+    assert ROUTE_SNAP_EPSILON_TICKS == 1
 
     base = Snap(lon=127.140000, lat=36.470000, snap_distance_m=3.0)
     same = Snap(lon=127.140000, lat=36.470000, snap_distance_m=9.9)
@@ -115,6 +116,29 @@ def test_snap_match_tolerance_is_one_osrm_unit():
     assert same_snap_point(base, same)
     assert same_snap_point(base, one_unit)
     assert not same_snap_point(base, ten_units)
+
+
+def test_one_unit_tolerance_holds_at_float_unfriendly_coordinates():
+    """한 눈금 허용이 **좌표에 따라 달라지지 않는다.**
+
+    기대값 정정의 반례(AGENTS.md 4절). 실제 OSRM이 같은 phantom node를 두 엔드포인트에서
+    이렇게 돌려줬다 — `/table` 127.120809, `/route` 127.120810. 한 눈금 차이인데 예전
+    구현은 도(度) 실수로 빼서 `1e-6`과 견줬고,
+
+        abs(127.120809 - 127.12081) == 1.0000000116860974e-06 > 1e-06
+
+    이라 **같은 지점을 다르다고 판정해** `/route`가 502(OSRM_ERROR)로 끝났다. 위 검사가
+    쓰는 (127.140000, 127.140001) 쌍은 우연히 통과하던 좌표라 이 결함을 잡지 못했다.
+    """
+    assert abs(127.120809 - 127.12081) > 1e-6  # 옛 판정이 깨지던 바로 그 값
+
+    table_snap = Snap(lon=127.120809, lat=36.446879, snap_distance_m=11.5)
+    route_snap = Snap(lon=127.120810, lat=36.446879, snap_distance_m=11.5)
+    assert same_snap_point(table_snap, route_snap)
+
+    # 두 눈금은 여전히 다른 지점이다 — 여유가 넓어진 것이 아니다.
+    two_units = Snap(lon=127.120811, lat=36.446879, snap_distance_m=11.5)
+    assert not same_snap_point(table_snap, two_units)
 
 
 def test_route_context_only_holds_nearest_fids():
