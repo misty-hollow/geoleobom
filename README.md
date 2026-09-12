@@ -1,9 +1,10 @@
 # 걸어봄 (geoleobom)
 
 위치 하나를 넣으면 생활시설까지 **실제 보행망 기준** 예상 도보시간을 보여주고, 후보를 4곳까지 담아 비교·공유하는 웹앱.
-제품 범위와 기술 스택은 `docs/걸어봄_확정설계_v2.3.md`가 기준이다.
+제품 범위와 기술 스택은 `docs/걸어봄_확정설계_v2.4.md`가 기준이다.
 
-- 확정 설계: `docs/걸어봄_확정설계_v2.3.md` (동결. **현재 단일 기준**)
+- 확정 설계: `docs/걸어봄_확정설계_v2.4.md` (동결. **현재 단일 기준**)
+- 확정 설계 v2.3: `docs/걸어봄_확정설계_v2.3.md` (동결 이력. v2.3→v2.4 차이는 v2.4 부록 F)
 - 확정 설계 v2.2: `docs/걸어봄_확정설계_v2.2.md` (동결 이력. v2.2→v2.3 차이는 v2.3 부록 E)
 - 확정 설계 v2.1: `docs/걸어봄_확정설계_v2.1.md` (동결 원본. 이력 문서)
 - 개발 운영 가이드: `docs/걸어봄_개발운영가이드_v1.md` (검증·학습 참고. 현재 작업 규칙은 AGENTS.md)
@@ -16,16 +17,18 @@
 기준 문서, 운영 파일, 배포 설정, CI, API·프론트 코드, 그리고 데이터·OSRM 파이프라인이 있다. **운영 서버가 공식 원본 3종으로 만든 실데이터 배포본(`2026Q3-cc-03`, 133,310행)으로 동작한다.** 다만 **시설 존재·분류 타당성 검수는 아직 하지 않았다** — 자동화가 매핑표를 적용한 것이지 사람이 확인한 것이 아니다(v2.3 7절, B 담당).
 
 ```
-api/           FastAPI — /api/health·/api/analyze 동작, 4-4 응답 모델·계약 상수,
-               분석 계산 core(app/analysis/, I/O 없음), adapter(app/adapters/)
-web/           React 18 + TypeScript + Vite 골격 — /api/health 표시
+api/           FastAPI — /api/health·/api/analyze·/api/route·/api/search 동작,
+               4-4 응답 모델·계약 상수, 분석 계산 core(app/analysis/, I/O 없음),
+               adapter(app/adapters/: osrm·poi·kakao)
+web/           React 18 + TypeScript + Vite — 검색·핀·결과·경로·비교 화면
 data/          원본 3종 ingest 파이프라인, POI GeoPackage 생성·검증(PC 전용 GIS
                의존성), 지원 폴리곤 생성, 게이트 2 품질 측정, OSRM 그래프 빌드
 data/region_data/  POI 수집 폴리곤 (지원 경계 + 3km, v2.3 1-3). 지원 판정 폴리곤은
                    api/app/region_data/ 에 있고 서버 이미지에 실린다
-docs/          확정설계 v2.3(현재)·v2.2·v2.1(이력) + 개발운영가이드 v1
-deploy/        배포 파일 (compose.yaml: caddy·osrm·api, Caddyfile, site/index.html,
-               deploy_api.sh·deploy_data.sh·rollback.sh·smoke.py·loadtest.py)
+docs/          확정설계 v2.4(현재)·v2.3·v2.2·v2.1(이력) + 개발운영가이드 v1
+deploy/        배포 파일 (compose.yaml: caddy·osrm·api, Caddyfile,
+               deploy_api.sh·deploy_web.sh·deploy_data.sh·rollback.sh,
+               smoke.py·loadtest.py·measure_flow.py)
 .github/       CI(repository-baseline·api-checks·data-checks·web-build) + api-image·PR 양식·보호 설정
 PROJECT.md     안내 + 승인된 결정
 AGENTS.md      AI 공통 작업 규칙
@@ -78,7 +81,8 @@ cd web && npm run dev                                                           
 운영 이미지는 `api/Dockerfile`이 같은 플래그를 붙이며, 로컬 실행도 같아야 한다 —
 개발 PC 로그에도 남길 이유가 없다.
 
-`/api/analyze`는 **GeoPackage 배포본과 OSRM이 둘 다 설정돼야** 켜진다. 설정이 없으면 가짜 값을 만들지 않고 **503**을 돌려준다. `/api/route`·`/api/search`는 아직 범위 밖이라 **501**이다.
+`/api/analyze`·`/api/route`는 **GeoPackage 배포본과 OSRM이 둘 다 설정돼야** 켜진다. 설정이 없으면 가짜 값을 만들지 않고 **503**을 돌려준다.
+`/api/search`는 **따로** 카카오 REST 키(`GEOLEOBOM_KAKAO_REST_KEY`)가 있어야 켜지고, 없으면 `/api/search`만 503이다 — 검색 준비 상태와 분석 준비 상태는 분리돼 있다(v2.4 4-4).
 
 ### 데이터와 OSRM까지 띄워서 실행 (2026-09-11 실제 실행해 확인)
 
@@ -125,7 +129,7 @@ data/.venv/Scripts/python.exe data/osrm/verify_table.py --out data/osrm/build/ta
 CI(`.github/workflows/ci.yml`)는 네 작업이다.
 
 - `repository-baseline` — 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값
-- `api-checks` — ruff + pytest. 계약 검사 두 벌: `test_contract_v22.py`(v2.3에서 값이 바뀌지 않은 상수)와 `test_contract_v23.py`(v2.3이 새로 정한 필수·nullable·UTC 표현). 계산 검사는 합성 후보와 모의 OSRM을 쓴다. 실제 OSRM 검사(`real_osrm` 마커)는 제외
+- `api-checks` — ruff + pytest. 계약 검사 세 벌: `test_contract_v22.py`(v2.3에서 값이 바뀌지 않은 상수), `test_contract_v23.py`(v2.3이 새로 정한 필수·nullable·UTC 표현), `test_contract_v24.py`(v2.4의 `/route` `versions`·스냅 일치·없는 `fid`). 계산 검사는 합성 후보와 모의 OSRM을 쓴다. 실제 OSRM 검사(`real_osrm` 마커)는 제외
 - `data-checks` — ruff + pytest. 작은 합성 픽스처만 쓴다. 실데이터·OSRM 빌드는 돌리지 않는다
 - `web-build` — `tsc -b` + `vite build`
 
@@ -157,7 +161,7 @@ CI(`.github/workflows/ci.yml`)는 네 작업이다.
 ```
 deploy/compose.yaml     caddy·osrm·api 서비스 (태그 고정, 외부 공개는 caddy만)
 deploy/Caddyfile        도메인·정적 파일·/api 프록시·로그 규칙
-deploy/site/index.html  공개되는 빈 페이지
+/srv/geoleobom/web/current  공개되는 웹 빌드 (deploy/deploy_web.sh가 올린다)
 ```
 
 ### 이미지 게재와 배포 명령
@@ -187,7 +191,7 @@ python deploy/smoke.py --base-url https://geoleobom.kr --baseline deploy/smoke_b
 - **`docker compose up -d` 성공은 기동 성공이 아니다.** 세 스크립트 모두 제한시간을 두고 `/api/health`가 답할 때까지 기다린 뒤 다음 단계로 간다. 데이터 교체는 응답이 오는 것만으로 부족해 **바뀐 `data_version`으로 답하는지**까지 확인한다. 컨테이너가 죽으면 제한시간 끝까지 기다리지 않고 로그를 찍고 실패한다.
 - `deploy_api.sh`는 태그만 믿지 않는다. 레지스트리에서 **digest를 조회해 태그 + digest로 고정**하고, 기동 뒤 실제로 그 이미지가 돌고 있는지 컨테이너에서 대조한다. 설정(`compose.yaml`·`Caddyfile`·`site/`)도 작업 트리가 아니라 **배포하는 커밋의 것**을 올린다.
 - **정상 복구 지점은 스모크 통과 뒤에만 움직인다.** `deploy_api.sh`가 마지막에 스모크를 돌리고, 통과해야 `.env.last-good`을 갱신한다. 실패하면 갱신하지 않고 롤백 명령을 알려 준다. `--skip-smoke`를 주면 갱신하지 않는다고 말한다.
-- 롤백은 `bash deploy/rollback.sh code` 또는 `... data`다.
+- 롤백은 `bash deploy/rollback.sh code`·`... data`·`... web` 셋이다. 코드·데이터·웹은 서로 다른 산출물이라 따로 되돌린다.
   - `code`는 `.env.last-good`의 이미지와 **그 배포의 커밋 SHA**를 함께 읽어, 그 커밋의 `deploy/`를 복원한 뒤 이미지를 되돌린다. **옛 이미지에 새 설정을 섞지 않는다** — 그 조합은 어디서도 검사된 적이 없다. 복원한 `compose.yaml`은 인자 없는 `up -d`로 **전체에 적용**한다(정의가 바뀐 서비스만 재생성되므로 필요 이상으로 끊지 않는다). Caddy는 바인드 마운트라 따로 reload한다.
   - `data`는 **아무것도 지우지 않고** `current`/`previous` 링크만 맞바꾼다. 사전 조건(직전 버전의 poi.gpkg·OSRM 파일 세트·기준일·MANIFEST, `previous != current`)을 **서비스를 정지하기 전에** 모두 확인하므로, 되돌릴 수 없는 상황이면 아무것도 건드리지 않고 멈춘다.
 - 되돌린 뒤에는 반드시 `deploy/smoke.py`로 실제 응답을 확인한다. 스크립트가 성공했다는 것만으로 복구됐다고 하지 않는다.
@@ -457,7 +461,7 @@ https://geoleobom.kr/            -> 200 (정적 페이지 유지)
 
 **서버 내부 처리 시간의 원 로그는 남아 있지 않다.** 롤백 실습으로 api 컨테이너를 재생성하면서 그때의 로그가 함께 사라졌다. 위 값은 측정 직후 읽은 것이고, 재현하려면 다시 측정해야 한다. 다음부터는 `loadtest.py --out`과 로그 발췌를 함께 남긴다.
 
-**응답시간 항목은 아직 "완료"가 아니다.** 10절은 `/api/analyze`뿐 아니라 **`/api/search`와 검색→분석→경로 표시 흐름**의 응답시간도 요구한다. `/api/search`·`/api/route`가 아직 501이고 화면도 골격이라 측정할 대상이 없다. **모바일(LTE)도 측정하지 않았다** — 유선만 쟀다.
+**응답시간 항목은 아직 "완료"가 아니다.** 10절은 `/api/analyze`뿐 아니라 **`/api/search`와 검색→분석→경로 표시 흐름**의 응답시간도 요구한다. `/api/search`·`/api/route`와 화면이 생겼으므로 이제 잴 대상은 있지만, **운영 서버에서 그 흐름을 아직 측정하지 않았다**(`deploy/measure_flow.py`가 그 측정을 담당한다). **모바일(LTE)도 측정하지 않았다** — 유선만 쟀다.
 
 **"캐시 미스"의 범위.** `loadtest.py`가 보장하는 것은 **클라이언트가 같은 좌표를 두 번 보내지 않는 것**이다. 서버 캐시는 TTL 30일이라, 위 순서대로 `latency`를 먼저 돌리면 그 5개 좌표가 이미 캐시에 남아 `load`의 첫 라운드 5건은 히트가 된다. 실제 서버 로그로는 **부하 60건이 미스 55 · 히트 5**였고, 앞서 돌린 `latency` 5건까지 합치면 미스 60 · 히트 5다. 부하 기준(오류·OOM·스왑 없음)에는 영향이 없지만, "부하 60건 모두 미스"는 아니다.
 
