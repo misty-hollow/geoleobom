@@ -36,7 +36,7 @@ import {
 import { ResultSheetContent } from '../components/result/ResultSheetContent'
 import { SearchBox } from '../components/search/SearchBox'
 import { SearchOverlay } from '../components/search/SearchOverlay'
-import { Sheet, type SheetSnap } from '../components/Sheet'
+import { Sheet, TOPBAR_H, type SheetSnap } from '../components/Sheet'
 import { TopBar } from '../components/TopBar'
 import { ko } from '../copy/ko'
 import {
@@ -196,10 +196,21 @@ export function MapPage() {
   }, [mapStatus, map, pinKey])
 
   // 중심 이동은 **확정 좌표가 바뀔 때만**. 핀 드래그·탭·스냅 변화·행 확장에는 지도가 그대로다.
+  //
+  // 시트가 이번 렌더에서 half로 바뀌는 중이면(핀 → 여기 분석: peek → half) 지금의 inset은 아직 peek
+  // 높이다. 그대로 중심을 잡으면 핀이 half 시트 위 가시영역 중앙이 아니라 그 아래에 놓인다(실제
+  // 카카오 QA 2026-09-12: 360×740에서 177px 자리에 304px). 새 높이가 onHeightChange로 오면 그때 잡는다.
+  const snapRef = useRef(snap)
+  snapRef.current = snap
+  const centerWhenSheetSettles = useRef(false)
   useEffect(() => {
     if (mapStatus !== 'ready' || fixedRef.current === null) return
+    if (layout === 'sheet' && snapRef.current !== 'half') {
+      centerWhenSheetSettles.current = true
+      return
+    }
     map.centerOn(fixedRef.current, insetRef.current)
-  }, [mapStatus, map, fixedKey])
+  }, [mapStatus, map, fixedKey, layout])
 
   const drawn = route.drawn
   useEffect(() => {
@@ -211,16 +222,21 @@ export function MapPage() {
     const line = drawn.geometry.coordinates
       .filter((pair) => pair.length >= 2)
       .map(([lon, lat]) => [lon, lat] as LonLatPair)
-    map.setRoute({ line }, insetRef.current)
-  }, [mapStatus, map, drawn])
+    // 모바일은 플로팅 상단바가 지도 위 0~72px을 가린다. 데스크톱 패널 배치에는 상단바가 없다.
+    map.setRoute({ line }, insetRef.current, layout === 'sheet' ? TOPBAR_H : 0)
+  }, [mapStatus, map, drawn, layout])
 
   const onSheetHeight = useCallback(
     (height: number) => {
       const inset = layout === 'panel' ? 0 : height
       insetRef.current = inset
       setBottomInset(inset)
+      if (centerWhenSheetSettles.current && fixedRef.current !== null) {
+        centerWhenSheetSettles.current = false
+        map.centerOn(fixedRef.current, inset)
+      }
     },
-    [layout],
+    [layout, map],
   )
   useEffect(() => {
     if (layout === 'panel') {

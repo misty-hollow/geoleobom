@@ -16,7 +16,8 @@
     "check:bundle": "node scripts/check-bundle.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "qa:browser": "node scripts/browser-qa.mjs"
+    "qa:browser": "node scripts/browser-qa.mjs",
+    "qa:kakao": "node scripts/browser-qa-kakao.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

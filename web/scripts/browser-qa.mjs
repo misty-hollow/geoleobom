@@ -188,6 +188,9 @@ async function main() {
     if (vp.mobile && vp.width < 960) {
       // --- 시트 스냅 ---
       check(`${vp.name}: 결과 진입 스냅 half`, (await sheetSnap(page)) === 'half')
+      // J-5: half에서 헤더 + 행 3개가 온전히 보인다(320×568 포함).
+      const thirdRow = await page.$eval('#row-pharmacy', (el) => ({ bottom: Math.round(el.getBoundingClientRect().bottom), inner: window.innerHeight }))
+      check(`${vp.name}: half에서 행 3개 온전히 표시(J-5)`, thirdRow.bottom <= thirdRow.inner, JSON.stringify(thirdRow))
       const handle = await page.$('button[aria-label="시트 크기 조절"]')
       const hb = await handle.boundingBox()
       await touchDrag(page, { x: hb.x + hb.width / 2, y: hb.y + hb.height / 2 }, { x: hb.x + hb.width / 2, y: 40 })
@@ -354,9 +357,13 @@ async function main() {
     const ring = await page.evaluate(() => {
       const el = document.activeElement
       const cs = getComputedStyle(el)
-      return { outline: cs.outlineStyle, width: cs.outlineWidth, color: cs.outlineColor }
+      // 검색 입력은 outline 대신 .field:focus-within의 box-shadow(2px accent)로 표시한다(DESIGN.md 10절).
+      const field = el.tagName === 'INPUT' ? el.parentElement : null
+      const fieldShadow = field ? getComputedStyle(field).boxShadow : null
+      return { tag: el.tagName, outline: cs.outlineStyle, width: cs.outlineWidth, color: cs.outlineColor, fieldShadow }
     })
-    check(`${vp.name}: focus-visible 링 2px`, ring.outline === 'solid' && ring.width === '2px', JSON.stringify(ring))
+    const ringOk = (ring.outline === 'solid' && ring.width === '2px') || (ring.tag === 'INPUT' && /rgb\(31, 79, 208\)/.test(ring.fieldShadow ?? ''))
+    check(`${vp.name}: focus-visible 표시(링 2px 또는 입력 필드 box-shadow)`, ringOk, JSON.stringify(ring))
 
     // --- 다이얼로그 ---
     const openBtn = vp.mobile && vp.width < 960 ? 'button[aria-label^="담은 후보 열기"]' : 'button:has-text("후보 0/4")'

@@ -200,6 +200,9 @@ describe('MapPage', () => {
     fireEvent.click(row)
     await waitFor(() => expect(fake.calls.polylineCreated).toBe(2))
     expect(row.getAttribute('aria-expanded')).toBe('true')
+    // 시트 배치: 경로 bounds 패딩은 상단바 72 + 24, 하단 half 385 + 24 (DESIGN.md 7절).
+    const [, boundsTop, , boundsBottom] = fake.calls.setBounds[fake.calls.setBounds.length - 1]
+    expect([boundsTop, boundsBottom]).toEqual([96, 409])
     const item = row.closest('li')!
     expect(within(item).getByText('경로 표시 중')).toBeTruthy()
     expect(within(item).getByText('가장 가까움')).toBeTruthy()
@@ -290,5 +293,13 @@ describe('MapPage', () => {
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/36.46410,127.13060'))
     await screen.findByRole('heading', { name: '지도에서 고른 위치' })
     expect(analyzeCalls()).toEqual(['/api/analyze?lon=127.13060&lat=36.46410'])
+
+    // 재중심은 **half 시트 높이** 기준이다(DESIGN.md 7절: 시트 위 가시영역 세로 중앙). 진입 순간 스냅이
+    // peek→half로 바뀌므로 peek 높이(132)로 먼저 잡으면 핀이 아래로 처진다(실제 카카오 QA 2026-09-12).
+    // 가짜 투영은 1px = 1e-5도, 중심은 핀보다 inset/2 px 아래(위도가 작다). innerHeight 740 → half 385.
+    await waitFor(() => expect(fake.calls.setCenter.length).toBeGreaterThan(0))
+    const center = fake.calls.setCenter[fake.calls.setCenter.length - 1]
+    const insetPx = Math.round((36.4641 - center.getLat()) * 2e5)
+    expect(insetPx).toBe(385)
   })
 })

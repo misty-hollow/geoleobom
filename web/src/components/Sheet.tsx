@@ -43,7 +43,8 @@ export interface SheetHeights {
 
 const HANDLE_H = 24
 const PEEK_CONTENT_H = 108
-const TOPBAR_H = 72
+/** 모바일 플로팅 상단바가 차지하는 높이(안전영역 제외). tokens.css `--topbar-h`와 같다. */
+export const TOPBAR_H = 72
 const FULL_GAP = 8
 const DRAG_THRESHOLD = 6
 const VELOCITY_BIAS = 0.35

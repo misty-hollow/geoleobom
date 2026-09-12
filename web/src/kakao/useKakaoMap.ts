@@ -82,8 +82,11 @@ export interface MapController {
   centerOn: (point: Point, bottomInset: number) => void
   /** 선택 지점 핀. `null`이면 지운다. */
   setPin: (pin: MapPin | null) => void
-  /** 경로 선 + 목적지 점. `null`이면 지운다. 선 전체가 시트에 가리지 않게 맞춘다. */
-  setRoute: (route: MapRoute | null, bottomInset: number) => void
+  /**
+   * 경로 선 + 목적지 점. `null`이면 지운다. 선 전체가 시트(아래)와 플로팅 상단바(위)에 가리지 않게
+   * 맞춘다. `topInset`은 상단바가 가린 높이(px, 데스크톱 패널 배치에서는 0).
+   */
+  setRoute: (route: MapRoute | null, bottomInset: number, topInset?: number) => void
   /** 공주대 신관캠퍼스 정문, level 4로 되돌린다(v2.4 3절 지원 지역 정책). */
   recenter: () => void
   zoomBy: (delta: 1 | -1) => void
@@ -330,7 +333,7 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
     [toLatLng],
   )
 
-  const setRoute = useCallback((route: MapRoute | null, bottomInset: number) => {
+  const setRoute = useCallback((route: MapRoute | null, bottomInset: number, topInset = 0) => {
     const kakao = kakaoRef.current
     const map = mapRef.current
     if (kakao === null || map === null) return
@@ -374,8 +377,9 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
 
     const bounds = new kakao.maps.LatLngBounds()
     for (const latlng of path) bounds.extend(latlng)
-    // (bounds, top, right, bottom, left) — 하단 = 시트 높이 + 24 (DESIGN.md 7절).
-    map.setBounds(bounds, 24, 24, bottomInset + 24, 24)
+    // (bounds, top, right, bottom, left) — 하단 = 시트 높이 + 24, 상단 = 상단바 높이 + 24 (DESIGN.md 7절).
+    // 상단 24만 두면 플로팅 검색바(0~60px) 뒤로 선과 목적지 점이 지나간다(실제 카카오 QA 2026-09-12, 390×844).
+    map.setBounds(bounds, topInset + 24, 24, bottomInset + 24, 24)
   }, [])
 
   const recenter = useCallback(() => {

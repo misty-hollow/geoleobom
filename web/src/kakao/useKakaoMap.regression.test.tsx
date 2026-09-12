@@ -140,6 +140,11 @@ describe('useKakaoMap 회귀', () => {
     const [, top, right, bottom, left] = fake.calls.setBounds[0]
     expect([top, right, bottom, left]).toEqual([24, 24, 385 + 24, 24])
 
+    // 상단 inset(모바일 플로팅 상단바 72) → 상단 패딩 72 + 24. 검색바 뒤로 선이 지나가지 않는다.
+    act(() => result.current.map.setRoute({ line }, 385, 72))
+    const [, top2, , bottom2] = fake.calls.setBounds[1]
+    expect([top2, bottom2]).toEqual([72 + 24, 385 + 24])
+
     act(() => result.current.map.setRoute(null, 0))
     expect(fake.polylines.every((polyline) => polyline.map === null)).toBe(true)
     expect(dest.map).toBeNull()
