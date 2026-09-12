@@ -5,6 +5,17 @@
  *   7개 뷰포트(320·360·375×667·390·768·960·1280)에서 홈 → 결과 → 시트 스냅(드래그·키보드) → 행 확장·top3 →
  *   RoutePanel(peek) → 검색 오버레이/인라인(결과·0건·실패) → 경로 stale(버전 불일치·404 → 안내 → 재분석) →
  *   키보드 순회·focus-visible → 다이얼로그(Esc·포커스 복귀) → 담기·토스트·5곳째 교체 → 상태 화면 4종 →
+ *
+ * ## 검사가 스스로 눈멀지 않게 (Astra finding 10)
+ *
+ *   - **44px 예외는 카카오 SDK가 그린 subtree뿐이다.** 예전에는 href 호스트명이 kakao·daum이면
+ *     제외해서, 우리가 만든 작은 카카오 링크까지 함께 빠졌다. 이제 `[data-kakao-map-host]`
+ *     안에 있는 것만 뺀다. 매 뷰포트마다 **대조군**(우리 DOM의 10×10 카카오 링크)을 심어
+ *     스캔에 잡히는지 확인한다.
+ *   - **focus-visible은 색 문자열이 아니라 두께·대비로 본다.** `outline-color: transparent`나
+ *     spread 0px도 문자열에는 색이 남아 예전 검사를 통과했다. 판정 논리는 `qa-focus.mjs`에
+ *     있고 `qa-focus.selftest.mjs`가 CI에서 반례로 검사한다. 여기서도 링을 투명하게 만든
+ *     **대조군**으로 판정이 살아 있는지 확인한다.
  *   비교표(강조·동률·sticky·가로 스크롤·좌표 한 줄·상태 셀 2줄) → reduced-motion. 각 단계 스크린샷을 남긴다.
  *   **자동 PASS는 시각 QA의 끝이 아니다** — 스크린샷을 DESIGN.md·Claude Design 레퍼런스와 사람이 대조한다.
  *
@@ -24,6 +35,7 @@
  * Engineering Authority(Opus)의 통합 검토 항목이다.
  */
 import { chromium } from 'playwright-core'
+import { FOCUS_MIN_CONTRAST, FOCUS_MIN_PX, focusIndicator } from './qa-focus.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -87,6 +99,77 @@ async function touchDrag(page, from, to, steps = 12) {
 async function sheetSnap(page) {
   return page.getAttribute('section[data-snap]', 'data-snap')
 }
+
+/**
+ * 포커스가 가 있는 요소의 표시를 잰다.
+ *
+ * 링을 그리는 것이 요소 자신이 아닐 수 있다 — 검색 입력은 감싼 `.field`가 그린다.
+ * 그래서 요소에서 위로 올라가며 **표시를 그리고 있는 쪽**을 고른다. 배경색은 뒤로 비치는
+ * 가장 가까운 불투명 조상에서 읽는다(대비 계산에 그 색이 쓰인다).
+ */
+const measureFocusRing = () => {
+  const el = document.activeElement
+  if (el === null || el === document.body) return null
+  const opaqueBackground = (from) => {
+    for (let node = from; node !== null; node = node.parentElement) {
+      const color = getComputedStyle(node).backgroundColor
+      const m = /rgba?\(([^)]+)\)/.exec(color)
+      if (m !== null) {
+        const parts = m[1].split(/[,/]/).map((v) => parseFloat(v.trim()))
+        if (parts.length < 4 || parts[3] > 0) return color
+      }
+    }
+    return getComputedStyle(document.body).backgroundColor
+  }
+  const draws = (node) => {
+    const cs = getComputedStyle(node)
+    const outlined = cs.outlineStyle !== 'none' && cs.outlineStyle !== 'hidden' && parseFloat(cs.outlineWidth) > 0
+    return outlined || (cs.boxShadow !== 'none' && cs.boxShadow !== '')
+  }
+  let host = el
+  for (let node = el; node !== null && node !== document.body; node = node.parentElement) {
+    if (draws(node)) {
+      host = node
+      break
+    }
+  }
+  const cs = getComputedStyle(host)
+  return {
+    tag: el.tagName,
+    name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 24),
+    host: host === el ? 'self' : host.className.toString().slice(0, 30),
+    outlineStyle: cs.outlineStyle,
+    outlineWidth: cs.outlineWidth,
+    outlineColor: cs.outlineColor,
+    boxShadow: cs.boxShadow,
+    borderColor: cs.borderTopColor,
+    borderWidth: cs.borderTopWidth,
+    background: opaqueBackground(host.parentElement ?? host),
+  }
+}
+
+/**
+ * 44px 미만 터치 타깃을 모은다 (UI/UX 설계 v1 J절).
+ *
+ * **예외는 카카오 SDK가 자기 subtree 안에 그린 것뿐이다.** SDK는 지도 안에 저작자 표시
+ * 링크(32×10)를 넣고 약관상 지우거나 키울 수 없다. 예전에는 "href 호스트명이 kakao·daum"
+ * 이면 제외했는데, 그러면 **우리가 만든 작은 카카오 링크도 함께 빠진다**(Astra finding 10).
+ * 이제 `[data-kakao-map-host]`(훅이 만들어 SDK에 넘긴 요소) 안에 있는 것만 뺀다 —
+ * 우리 React 트리는 그 안에 아무것도 그리지 않는다.
+ */
+const scanSmallTargets = () =>
+  Array.from(document.querySelectorAll('button, a, [role="option"]'))
+    .filter((el) => {
+      const r = el.getBoundingClientRect()
+      const cs = getComputedStyle(el)
+      const vendor = el.closest('[data-kakao-map-host]') !== null
+      return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && !vendor && !el.closest('[hidden]') && !el.closest('dialog:not([open])')
+    })
+    .map((el) => {
+      const r = el.getBoundingClientRect()
+      return { name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 24), w: Math.round(r.width), h: Math.round(r.height) }
+    })
+    .filter((b) => b.h < 44 || b.w < 44)
 
 async function main() {
   const browser = await chromium.launch({ channel: process.env.QA_BROWSER_CHANNEL ?? 'msedge', headless: true })
@@ -165,37 +248,23 @@ async function main() {
     })
     check(`${vp.name}: 분 숫자 크기(≤359: 24px, else 28px)`, numFont === (vp.width <= 359 ? '24px' : '28px'), String(numFont))
 
-    // 터치 타깃 — **우리가 만든 것만** 잰다.
-    //
-    // 카카오 JS SDK는 지도 안에 자기 저작자 표시 링크를 넣는다(`<a href="http://map.kakao.com/">`,
-    // 32×10). 그 크기·마크업은 SDK가 정하고 약관상 지우거나 키울 수 없으므로 우리 44px 규칙의
-    // 대상이 아니다. `web/.env.local`에 JS 키가 없으면 SDK가 로드되지 않아 이 링크도 없다 —
-    // 그래서 키를 넣기 전 실행에서는 이 검사가 통과했다(2026-09-12 실제 키 투입 후 7 뷰포트 전부 실패).
-    // **우리 요소의 기준을 낮춘 것이 아니라 제3자 요소를 범위에서 뺀 것이다.**
-    const small = await page.$$eval('button, a, [role="option"]', (els) =>
-      els
-        .filter((el) => {
-          const r = el.getBoundingClientRect()
-          const cs = getComputedStyle(el)
-          // 호스트명으로 판정한다. href 문자열 정규식은 `evil.com/?x=kakao.` 같은 것에 속는다.
-          let vendor = false
-          if (el.tagName === 'A') {
-            try {
-              const host = new URL(el.href, location.href).hostname
-              vendor = /(^|\.)(kakao\.com|daum\.net|daumcdn\.net)$/.test(host)
-            } catch {
-              vendor = false
-            }
-          }
-          return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && !vendor && !el.closest('[hidden]') && !el.closest('dialog:not([open])')
-        })
-        .map((el) => {
-          const r = el.getBoundingClientRect()
-          return { name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 24), w: Math.round(r.width), h: Math.round(r.height) }
-        })
-        .filter((b) => b.h < 44 || b.w < 44),
-    )
+    // 터치 타깃 — **우리가 만든 것만** 잰다 (scanSmallTargets 주석 참고).
+    const small = await page.evaluate(scanSmallTargets)
     check(`${vp.name}: 44px 미만 터치 타깃 없음`, small.length === 0, JSON.stringify(small).slice(0, 300))
+
+    // **대조군.** 예외가 너무 넓으면 이 검사는 조용히 아무것도 보지 않는다. 우리 DOM에
+    // 작은 카카오 링크를 하나 심어 같은 스캔에 **잡히는지** 보고 치운다(Astra finding 10).
+    await page.evaluate(() => {
+      const a = document.createElement('a')
+      a.id = 'qa-decoy-link'
+      a.href = 'https://map.kakao.com/'
+      a.textContent = 'decoy'
+      a.style.cssText = 'position:fixed;left:0;bottom:0;width:10px;height:10px;z-index:9999'
+      document.body.appendChild(a)
+    })
+    const decoyCaught = (await page.evaluate(scanSmallTargets)).some((b) => b.name === 'decoy')
+    await page.evaluate(() => document.getElementById('qa-decoy-link')?.remove())
+    check(`${vp.name}: 44px 검사 대조군 — 우리 DOM의 작은 카카오 링크는 잡힌다`, decoyCaught)
 
     // live region
     const live = await page.$eval('[aria-live="polite"]', (el) => el.textContent)
@@ -370,16 +439,36 @@ async function main() {
     const joined = names.join(' > ')
     check(`${vp.name}: Tab 순회에 담기·공유·행 포함`, /담기|담김/.test(joined) && /공유/.test(joined) && /편의점/.test(joined), joined.slice(0, 200))
     await shot(page, `${vp.name}-08-focus`)
-    const ring = await page.evaluate(() => {
-      const el = document.activeElement
-      const cs = getComputedStyle(el)
-      // 검색 입력은 outline 대신 .field:focus-within의 box-shadow(2px accent)로 표시한다(DESIGN.md 10절).
-      const field = el.tagName === 'INPUT' ? el.parentElement : null
-      const fieldShadow = field ? getComputedStyle(field).boxShadow : null
-      return { tag: el.tagName, outline: cs.outlineStyle, width: cs.outlineWidth, color: cs.outlineColor, fieldShadow }
+    // 포커스 표시는 **두께와 대비**로 판정한다. 색 문자열이 들어 있는지로 보면
+    // `outline-color: transparent`나 spread 0px도 통과한다(Astra finding 10).
+    const measured = await page.evaluate(measureFocusRing)
+    const ring = measured === null ? null : focusIndicator(measured)
+    const ringDetail = JSON.stringify({ ...measured, px: ring?.px, parts: ring?.parts, contrast: ring && Math.round(ring.contrast * 100) / 100 })
+    check(
+      `${vp.name}: focus-visible 표시가 ${FOCUS_MIN_PX}px 이상`,
+      ring !== null && ring.px >= FOCUS_MIN_PX,
+      ringDetail,
+    )
+    check(
+      `${vp.name}: focus-visible 표시 대비 ${FOCUS_MIN_CONTRAST}:1 이상 (WCAG 1.4.11)`,
+      ring !== null && ring.contrast >= FOCUS_MIN_CONTRAST,
+      ringDetail,
+    )
+
+    // **대조군.** 링을 투명하게 만들고 같은 판정이 **거부하는지** 본다. 거부하지 못하면
+    // 이 검사는 아무것도 지키지 않는 것이므로, CSS가 멀쩡해도 실패로 남긴다.
+    await page.addStyleTag({
+      id: 'qa-focus-decoy',
+      content: '*:focus-visible { outline-color: transparent !important; } .field:focus-within { border-color: transparent !important; box-shadow: none !important; }',
     })
-    const ringOk = (ring.outline === 'solid' && ring.width === '2px') || (ring.tag === 'INPUT' && /rgb\(31, 79, 208\)/.test(ring.fieldShadow ?? ''))
-    check(`${vp.name}: focus-visible 표시(링 2px 또는 입력 필드 box-shadow)`, ringOk, JSON.stringify(ring))
+    const blind = await page.evaluate(measureFocusRing)
+    const blindRing = blind === null ? null : focusIndicator(blind)
+    await page.evaluate(() => document.getElementById('qa-focus-decoy')?.remove())
+    check(
+      `${vp.name}: focus 검사 대조군 — 보이지 않는 링은 거부한다`,
+      blindRing !== null && (blindRing.px < FOCUS_MIN_PX || blindRing.contrast < FOCUS_MIN_CONTRAST),
+      JSON.stringify({ px: blindRing?.px, contrast: blindRing && Math.round(blindRing.contrast * 100) / 100 }),
+    )
 
     // --- 다이얼로그 ---
     const openBtn = vp.mobile && vp.width < 960 ? 'button[aria-label^="담은 후보 열기"]' : 'button:has-text("후보 0/4")'

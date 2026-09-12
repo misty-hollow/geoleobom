@@ -193,3 +193,9 @@ jobs:
       # 못 찾는 상태가 통과로 보이지 않는다 (v2.4 4-1, 5절).
       - name: Prove the REST key never reaches the bundle
         run: npm run check:bundle
+
+      # 브라우저 QA는 사람이 손으로 돌리므로 CI가 그 판정을 실행하지 않는다. 판정
+      # 논리(포커스 표시의 두께·대비)만 떼어 내 손계산 값과 false-green 반례로 검사한다.
+      # 이것이 없으면 "무엇이든 통과시키는 QA"가 조용히 초록으로 남는다.
+      - name: Check the browser-QA focus judgment against its counterexamples
+        run: npm run check:qa

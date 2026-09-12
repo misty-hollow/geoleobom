@@ -14,6 +14,7 @@
     "gen:api": "openapi-typescript src/api/openapi.json -o src/api/schema.ts",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
+    "check:qa": "node scripts/qa-focus.selftest.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "qa:browser": "node scripts/browser-qa.mjs",
