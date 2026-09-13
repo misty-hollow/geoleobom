@@ -24,7 +24,10 @@ import App from '../App'
 import { METHOD_NOTICE } from '../format'
 import { resetAnalysisCacheForTests } from '../hooks/useAnalysis'
 import { resetKakaoSdkForTests } from '../kakao/useKakaoMap'
+import { computeSheetHeights, TOPBAR_H, type SheetSnap } from '../components/Sheet'
+import { ko } from '../copy/ko'
 import {
+  FAKE_ATTRIBUTION_BAR_H,
   FAKE_MAP_LAYERS,
   findFakeCopyrightBar,
   installFakeKakao,
@@ -85,6 +88,31 @@ async function waitForMapReady(fake: FakeKakao): Promise<void> {
   })
 }
 
+/**
+ * jsdom은 레이아웃을 하지 않아 모든 요소의 `clientHeight`가 0이다.
+ *
+ * 훅은 "상단바 아래 ~ 시트 위의 틈에 저작권 막대가 들어가는가"를 지도 host의 높이로
+ * 판단하므로, 0인 채로는 **규칙이 늘 '자리 없음'으로 읽혀** 검사가 아무것도 확인하지 못한다.
+ * 실제 브라우저에서 이 요소는 뷰포트를 가득 채운다(2026-09-13 실측: 390×844에서 844,
+ * 768×1024에서 1024). 그 사실만 말해 주고 다른 요소는 그대로 0으로 둔다.
+ */
+const clientHeightDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')
+
+function stubMapHostHeight(): void {
+  Object.defineProperty(Element.prototype, 'clientHeight', {
+    configurable: true,
+    get(this: Element) {
+      return (this as HTMLElement).dataset?.kakaoMapHost === undefined ? 0 : window.innerHeight
+    },
+  })
+}
+
+function restoreMapHostHeight(): void {
+  if (clientHeightDescriptor !== undefined) {
+    Object.defineProperty(Element.prototype, 'clientHeight', clientHeightDescriptor)
+  }
+}
+
 describe('960px 왕복에도 지도가 살아 있다 (Astra finding 2)', () => {
   let fake: FakeKakao
   const fetchMock = vi.fn<typeof fetch>()
@@ -92,6 +120,7 @@ describe('960px 왕복에도 지도가 살아 있다 (Astra finding 2)', () => {
   beforeEach(() => {
     resetKakaoSdkForTests()
     resetAnalysisCacheForTests()
+    stubMapHostHeight()
     fake = installFakeKakao()
     CountingResizeObserver.reset()
     vi.stubGlobal('ResizeObserver', CountingResizeObserver)
@@ -109,6 +138,7 @@ describe('960px 왕복에도 지도가 살아 있다 (Astra finding 2)', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     uninstallFakeKakao()
+    restoreMapHostHeight()
     setViewportWidth(390)
   })
 
@@ -274,15 +304,23 @@ describe('960px 왕복에도 지도가 살아 있다 (Astra finding 2)', () => {
   })
 
   /**
-   * 모바일에서 카카오 저작권·축척 막대가 시트 위로 올라온다 (Fable delta QA 2026-09-13).
+   * 카카오 저작권·축척 막대는 **올릴 자리가 있을 때만** 올린다 (Fable delta QA·재-QA 2026-09-13).
    *
-   * Fable 재현(390×844): 저작권이 y≈825에 있고 peek 시트 상단이 y≈712, half가 y≈405라
-   * 두 상태 모두 시트가 그 위를 덮었다. 데스크톱은 시트가 없어 원래 자리가 맞다.
+   * 1차 재현(390×844): 저작권이 y≈825인데 peek 시트 상단이 712, half가 405라 두 상태 모두
+   * 시트가 그 위를 덮었다 → 시트가 가린 높이만큼 올린다.
    *
-   * 가짜 SDK는 실제 SDK와 같은 모양으로 막대를 만든다(fakeKakao.ts). 검사가 보는 것은
-   * "시트가 가린 높이만큼 올라갔는가"와 "패널에서는 SDK가 준 자리로 돌아가는가"다.
+   * 재-QA 재현(390×844·768×1024 full): 그렇게 올렸더니 이번에는 막대(57~76)가 플로팅 검색
+   * pill(12~60)과 **3px 겹쳤다.** 상단바 아래와 시트 위 사이에 남은 틈이 20px뿐인데 막대가
+   * 19px이라 억지로 끼워 넣은 꼴이었다. full에서는 SDK가 놓은 자리로 두고, 시트가 그 자리를
+   * 덮어 보이지 않는 것은 **기존 레이아웃의 결과**로 받아들인다(Fable이 허용한 UX 판정).
+   *
+   * **"모바일이면 언제나 보인다"는 불변식을 만들지 않는다.** peek·half는 보여야 하고, full은
+   * 검색바와 겹치지 않아야 하며 틈이 모자라면 SDK 자리가 정답이다.
+   *
+   * jsdom은 레이아웃을 하지 않으므로 높이를 검사가 직접 말해 준다 — 지도 host는 뷰포트
+   * 높이(740), 막대는 실측 19px(fakeKakao)다. 시트 높이는 Sheet가 같은 뷰포트 높이로 계산한다.
    */
-  it('모바일에서는 저작권 막대가 시트 높이만큼 올라가고, 데스크톱에서는 원래 자리다', async () => {
+  it('저작권 막대는 peek·half에서 올라가고, 틈이 좁은 full과 데스크톱에서는 SDK 자리다', async () => {
     render(
       <MemoryRouter initialEntries={['/p/36.47130,127.14020']}>
         <App />
@@ -293,20 +331,66 @@ describe('960px 왕복에도 지도가 살아 있다 (Astra finding 2)', () => {
 
     const bar = findFakeCopyrightBar()
     expect(bar, '가짜 SDK가 저작권 막대를 만들지 않았다 — 이 검사가 아무것도 보지 않는다').not.toBeNull()
+    expect(bar!.offsetHeight, '막대 높이를 모르면 틈 판단을 검사할 수 없다').toBe(FAKE_ATTRIBUTION_BAR_H)
 
-    // 모바일: 시트가 가린 높이(> 0)만큼 올라가 있다.
-    await waitFor(() => {
-      const raised = Number.parseFloat(bar!.style.bottom)
-      expect(Number.isFinite(raised) && raised > 0, `bottom=${bar!.style.bottom}`).toBe(true)
-    })
-    const raised = Number.parseFloat(bar!.style.bottom)
+    // 지도 host가 뷰포트를 가득 채운다는 사실은 beforeEach가 말해 준다(위 stubMapHostHeight).
+    const host = document.querySelector<HTMLElement>('[data-kakao-map-host]')
+    expect(host?.clientHeight, 'host 높이 스텁이 걸리지 않았다').toBe(window.innerHeight)
 
-    // 데스크톱: SDK가 준 자리(0px)로 돌아간다.
+    const handle = () => screen.getByRole('button', { name: ko.sheet.handle })
+    const toSnap = async (key: 'ArrowUp' | 'ArrowDown', want: SheetSnap) => {
+      fireEvent.keyDown(handle(), { key })
+      await waitFor(() => expect(document.querySelector('section[data-snap]')?.getAttribute('data-snap')).toBe(want))
+    }
+    /** 막대 윗변이 상단바가 가린 띠(TOPBAR_H) 아래에 있는가. 겹치면 음수가 된다. */
+    const clearanceBelowTopBar = () => {
+      const bottom = Number.parseFloat(bar!.style.bottom)
+      const top = window.innerHeight - bottom - FAKE_ATTRIBUTION_BAR_H
+      return top - TOPBAR_H
+    }
+    const heights = computeSheetHeights(window.innerHeight, 0, 0)
+
+    // --- half: 틈이 넉넉하다 → 시트 바로 위로 올라간다 ---
+    await waitFor(() => expect(Number.parseFloat(bar!.style.bottom)).toBeGreaterThan(heights.half))
+    const atHalf = bar!.style.bottom
+    expect(clearanceBelowTopBar(), '검색바와 겹쳤다').toBeGreaterThan(0)
+
+    // --- peek: 더 넉넉하다 → 역시 올라간다 ---
+    await toSnap('ArrowDown', 'peek')
+    await waitFor(() => expect(Number.parseFloat(bar!.style.bottom)).toBeGreaterThan(heights.peek))
+    const atPeek = bar!.style.bottom
+    expect(clearanceBelowTopBar()).toBeGreaterThan(0)
+
+    // --- full: 상단바 아래 ~ 시트 위의 틈이 막대보다 좁다 → SDK 자리로 둔다 ---
+    await toSnap('ArrowUp', 'half')
+    await toSnap('ArrowUp', 'full')
+    const usableGap = window.innerHeight - heights.full - TOPBAR_H
+    expect(usableGap, '이 뷰포트에서는 full의 틈이 좁지 않다 — 검사 전제가 깨졌다').toBeLessThan(
+      FAKE_ATTRIBUTION_BAR_H,
+    )
+    await waitFor(() => expect(bar!.style.bottom, `full에서 좁은 틈에 올렸다(${usableGap}px)`).toBe('0px'))
+    // 숨긴 것이 아니다 — 자리만 SDK 기본값이고 보이기 자체를 막는 스타일은 주지 않는다.
+    expect(bar!.style.display).toBe('')
+    expect(bar!.style.opacity).toBe('')
+    expect(bar!.querySelector('a[href*="map.kakao.com"]'), '로고를 지웠다').not.toBeNull()
+
+    // --- 데스크톱: 시트가 없다 → SDK 자리 ---
     await resize(1280)
     await waitFor(() => expect(bar!.style.bottom).toBe('0px'))
 
-    // 다시 모바일: 같은 높이로 돌아온다.
+    // --- 되돌아와도 상태가 쌓이지 않는다 ---
+    // 배치를 오가도 스냅은 full 그대로이므로 자리도 그대로여야 한다.
     await resize(390)
-    await waitFor(() => expect(Number.parseFloat(bar!.style.bottom)).toBe(raised))
+    await waitFor(() => expect(document.querySelector('aside')).toBeNull())
+    expect(bar!.style.bottom).toBe('0px')
+    // full → half → peek → half를 돌아도 처음 잰 값과 **똑같다**.
+    await toSnap('ArrowDown', 'half')
+    await waitFor(() => expect(bar!.style.bottom).toBe(atHalf))
+    await toSnap('ArrowDown', 'peek')
+    await waitFor(() => expect(bar!.style.bottom).toBe(atPeek))
+    await toSnap('ArrowUp', 'half')
+    await waitFor(() => expect(bar!.style.bottom).toBe(atHalf))
+    await toSnap('ArrowUp', 'full')
+    await waitFor(() => expect(bar!.style.bottom).toBe('0px'))
   })
 })

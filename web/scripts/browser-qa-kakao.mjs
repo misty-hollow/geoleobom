@@ -11,8 +11,12 @@
  *   화면에 붙어 있고 타일·핀·경로선이 남는지. 뷰포트별 새 페이지 QA로는 이것이 잡히지 않는다 — 새 페이지는
  *   지도를 매번 처음부터 만들기 때문이다(Astra finding 2: resize 뒤 지도 DOM children 3 → 0).
  *   같은 왕복에서 **전환으로 들어온 데스크톱의 핀·경로 자리를 1280 cold entry와 맞대 본다**
- *   (Fable delta QA 2026-09-13: 전환 뒤 지도 내용이 위쪽 1/3에 몰렸다). 그리고 **모바일 peek·half·full에서
- *   카카오 저작권이 시트에 가리지 않는지**를 `elementFromPoint`와 32×10 크기까지 확인한다(attributionVisible).
+ *   (Fable delta QA 2026-09-13: 전환 뒤 지도 내용이 위쪽 1/3에 몰렸다). 그리고 **카카오 저작권 막대가
+ *   스냅마다 제자리에 있는지**를 본다(attributionVisible, 390·768·1280). 규칙은 스냅마다 다르다 —
+ *   peek·half는 시트 위로 올라와 보여야 하고, 위아래가 가리고 남은 틈이 막대보다 좁은 full에서는
+ *   **올리지 않고 SDK 자리로 두어** 검색바와 겹치지 않아야 하며, 데스크톱은 SDK 자리 그대로다.
+ *   "모바일이면 언제나 보인다"는 불변식은 만들지 않는다(Fable 재-QA 2026-09-13이 full에서 3px 겹침을
+ *   찾았고, full에서 시트가 막대를 덮는 것은 허용했다). 크기 32×10·href·이미지·감추는 스타일 없음도 함께 본다.
  *   **자동 PASS는 시각 QA의 끝이 아니다** — 스크린샷(타일 위 가독성·핀·선)을 사람이 본다.
  *
  * 준비
@@ -165,23 +169,41 @@ const probe = () => {
         route: boxes.length ? { top: Math.round(Math.min(...boxes.map((b) => b.top))), bottom: Math.round(Math.max(...boxes.map((b) => b.bottom))) } : null,
       }
     })(),
-    // 카카오 저작권·축척 막대: 시트가 덮지 않고 사용자에게 보이는가.
+    // 카카오 저작권·축척 막대: 어디에 놓였고, 우리 UI와 어떻게 만나는가.
     attribution: (() => {
       const logo = host?.querySelector('a[href*="map.kakao.com"]') ?? null
       if (logo === null) return null
+      let bar = logo
+      while (bar !== null && bar.parentElement !== host) bar = bar.parentElement
       const b = logo.getBoundingClientRect()
+      const barBox = bar === null ? b : bar.getBoundingClientRect()
       const sheet = document.querySelector('section[data-snap]')
       const sheetTop = sheet ? Math.round(sheet.getBoundingClientRect().top) : null
+      const topBar = document.querySelector('header')
+      const topBarBox = topBar !== null && topBar.closest('[class*="topBar"]') !== null ? topBar.getBoundingClientRect() : null
       const top = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2))
+      const overlap = (x, y) => (x === null || y === null ? 0 : Math.max(0, Math.min(x.bottom, y.bottom) - Math.max(x.top, y.top)))
       return {
         y: Math.round(b.top),
         bottom: Math.round(b.bottom),
         size: [Math.round(b.width), Math.round(b.height)],
         sheetTop,
         snap: sheet?.dataset.snap ?? null,
+        href: logo.getAttribute('href'),
+        imgSrc: logo.querySelector('img')?.getAttribute('src') ?? null,
+        // 감추는 스타일을 우리가 준 적이 없어야 한다.
+        hidden: bar === null ? null : { display: bar.style.display, opacity: bar.style.opacity, visibility: bar.style.visibility },
+        // SDK가 놓은 자리 그대로인가(우리가 올리지 않았는가).
+        atSdkOrigin: bar === null ? null : bar.style.bottom === '0px',
+        styleBottom: bar?.style.bottom ?? null,
+        barHeight: Math.round(barBox.height),
         // 우리 UI가 그 위를 덮고 있지 않은가. 시트가 덮으면 여기서 SECTION이 잡힌다.
         onTop: Boolean(top && (top === logo || logo.contains(top))),
-        aboveSheet: sheetTop === null || Math.round(b.bottom) <= sheetTop,
+        aboveSheet: sheetTop === null || Math.round(barBox.bottom) <= sheetTop,
+        // 플로팅 검색바와의 세로 겹침(px). full에서 좁은 틈에 끼우면 여기가 커진다.
+        overlapWithTopBar: Math.round(overlap(barBox, topBarBox)),
+        // 상단바 아래 ~ 시트 위의 실제 틈.
+        usableGap: topBarBox === null || sheetTop === null ? null : Math.round(sheetTop - topBarBox.bottom),
       }
     })(),
   }
@@ -304,29 +326,80 @@ async function roundTrip(browser) {
  * 자리만 가시영역 아래 끝으로 옮겼다(useKakaoMap의 `setAttributionInset`).
  */
 async function attributionVisible(browser) {
-  for (const [width, height] of [[390, 844], [768, 1024]]) {
-    const context = await browser.newContext({ viewport: { width, height }, hasTouch: true, deviceScaleFactor: 1, locale: 'ko-KR' })
+  /** 막대 위아래 여유(useKakaoMap의 `ATTRIBUTION_GAP`). 틈 판단에 같은 값을 쓴다. */
+  const GAP = 4
+
+  for (const [width, height, mobile] of [
+    [390, 844, true],
+    [768, 1024, true],
+    [1280, 800, false],
+  ]) {
+    const context = await browser.newContext({ viewport: { width, height }, hasTouch: mobile, deviceScaleFactor: 1, locale: 'ko-KR' })
     const page = await context.newPage()
     await page.goto(`${BASE}/p/${P_ENTRIES[0][1]}`, { waitUntil: 'domcontentloaded' })
     await waitAnalysis(page)
     await waitTiles(page)
-    for (const snap of ['half', 'peek', 'full']) {
-      if (snap !== 'half') {
+
+    // 데스크톱에는 시트가 없다 — 스냅을 오갈 것도 없이 SDK 자리가 정답이다.
+    const snaps = mobile ? ['half', 'peek', 'full', 'half'] : ['(시트 없음)']
+    let seen = 0
+    for (const snap of snaps) {
+      if (mobile && seen > 0) {
         await page.focus('button[aria-label="시트 크기 조절"]')
-        await page.keyboard.press(snap === 'peek' ? 'ArrowDown' : 'ArrowUp')
-        await page.waitForTimeout(700)
-        if (snap === 'full') {
-          await page.keyboard.press('ArrowUp')
-          await page.waitForTimeout(700)
+        // 지금 스냅에서 목표까지 한 칸씩 움직인다. SNAPS = peek < half < full.
+        const order = ['peek', 'half', 'full']
+        let current = await page.getAttribute('section[data-snap]', 'data-snap')
+        while (current !== snap) {
+          await page.keyboard.press(order.indexOf(snap) > order.indexOf(current) ? 'ArrowUp' : 'ArrowDown')
+          await page.waitForTimeout(600)
+          current = await page.getAttribute('section[data-snap]', 'data-snap')
         }
       }
+      seen += 1
       const a = (await page.evaluate(probe)).attribution
-      const label = `저작권 ${width} ${a?.snap ?? snap}`
-      check(`${label}: 시트 위에 있다`, a !== null && a.aboveSheet, JSON.stringify(a))
-      check(`${label}: 우리 UI가 덮지 않는다(elementFromPoint)`, a !== null && a.onTop, JSON.stringify(a))
-      // 카카오가 정한 크기는 우리가 바꾸지 않는다. 자리만 옮겼다는 증거다.
-      check(`${label}: 크기가 32×10 그대로다`, a !== null && a.size[0] === 32 && a.size[1] === 10, JSON.stringify(a?.size))
-      await shot(page, `attribution-${width}-${a?.snap ?? snap}`)
+      const label = `저작권 ${width} ${a?.snap ?? snap}${seen === snaps.length && mobile ? ' (되돌아옴)' : ''}`
+      if (a === null) {
+        check(`${label}: 저작권 막대를 찾았다`, false, 'SDK가 만든 로고 링크가 없다')
+        continue
+      }
+
+      // --- 어디서나 지켜야 하는 것: 우리가 크기·내용·가시성을 건드리지 않았다 ---
+      check(`${label}: 크기가 32×10 그대로다`, a.size[0] === 32 && a.size[1] === 10, JSON.stringify(a.size))
+      check(
+        `${label}: href·이미지가 카카오 것 그대로다`,
+        a.href === 'http://map.kakao.com/' && (a.imgSrc ?? '').includes('daumcdn.net'),
+        JSON.stringify({ href: a.href, img: a.imgSrc }),
+      )
+      check(
+        `${label}: 감추는 스타일을 주지 않았다`,
+        a.hidden !== null && a.hidden.display === '' && a.hidden.opacity === '' && a.hidden.visibility === '',
+        JSON.stringify(a.hidden),
+      )
+      // 검색바와의 겹침은 **어느 스냅에서도** 허용하지 않는다(Fable 재-QA 2026-09-13: full에서 3px).
+      check(`${label}: 플로팅 검색바와 겹치지 않는다`, a.overlapWithTopBar === 0, `overlap=${a.overlapWithTopBar}px, gap=${a.usableGap}px`)
+
+      if (!mobile) {
+        // --- 데스크톱: 시트가 없으므로 SDK가 놓은 자리 그대로여야 한다 ---
+        check(`${label}: SDK 원래 자리 그대로다`, a.atSdkOrigin === true, `bottom=${a.styleBottom}`)
+        check(`${label}: 사용자에게 보인다`, a.onTop, JSON.stringify({ y: a.y, onTop: a.onTop }))
+      } else if (a.usableGap !== null && a.usableGap < a.barHeight + GAP * 2) {
+        // --- 틈이 좁다(full): 억지로 올리지 않고 SDK 자리로 둔다 ---
+        //
+        // 시트가 그 자리를 덮어 보이지 않는 것은 **기존 레이아웃의 결과**다. full은 지도
+        // 대부분을 일부러 가리는 상태이므로 Fable이 이 동작을 명시적으로 허용했다.
+        // "모바일이면 언제나 보인다"는 불변식을 여기서 만들지 않는다.
+        check(
+          `${label}: 틈이 좁으면(${a.usableGap} < ${a.barHeight + GAP * 2}) SDK 자리로 둔다`,
+          a.atSdkOrigin === true,
+          JSON.stringify({ bottom: a.styleBottom, usableGap: a.usableGap, barHeight: a.barHeight }),
+        )
+      } else {
+        // --- 틈이 넉넉하다(peek·half): 시트 위 지도 가시영역으로 올려 보이게 한다 ---
+        check(`${label}: 시트 위에 있다`, a.aboveSheet, JSON.stringify(a))
+        check(`${label}: 우리 UI가 덮지 않는다(elementFromPoint)`, a.onTop, JSON.stringify(a))
+        check(`${label}: SDK 자리에서 올렸다`, a.atSdkOrigin === false, `bottom=${a.styleBottom}`)
+      }
+      await shot(page, `attribution-${width}-${a.snap ?? snap}-${seen}`)
     }
     await context.close()
   }

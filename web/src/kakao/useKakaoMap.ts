@@ -106,9 +106,12 @@ export interface MapController {
   setRoute: (route: MapRoute | null, bottomInset: number, topInset?: number) => void
   /**
    * 카카오가 그린 **저작권·축척 막대**를 시트가 가린 높이만큼 올린다(파일 아래 주석).
-   * `0`이면 SDK가 놓은 자리(지도 아래 끝)로 되돌린다.
+   *
+   * `topInset`은 플로팅 상단바가 지도 위를 가린 높이(px, 데스크톱 패널 배치에서는 0)로,
+   * `setRoute`가 쓰는 값과 같다. 위아래가 가리고 남은 틈이 막대보다 좁으면 **올리지 않고**
+   * SDK가 놓은 자리로 둔다. `bottomInset`이 0일 때도 SDK 자리로 되돌린다.
    */
-  setAttributionInset: (bottomInset: number) => void
+  setAttributionInset: (bottomInset: number, topInset?: number) => void
   /** 공주대 신관캠퍼스 정문, level 4로 되돌린다(v2.4 3절 지원 지역 정책). */
   recenter: () => void
   zoomBy: (delta: 1 | -1) => void
@@ -235,6 +238,21 @@ function destinationImageSource(): string {
  * 우리가 바꾸는 것은 이 요소의 `bottom` 한 값뿐이다. 안쪽 DOM·크기(32×10)·문구·이미지는
  * 손대지 않고, 지우거나 가리지도 않는다 — **가려져 있던 것을 보이게 하는 방향으로만** 옮긴다.
  *
+ * ## 틈이 좁으면 올리지 않는다
+ *
+ * 시트를 full로 올리면 위아래가 거의 다 가려 **올릴 자리가 없다.** 그래도 올리면 막대가
+ * 플로팅 검색바 뒤에 끼어 겹친다(Fable 재-QA 2026-09-13: 390×844·768×1024 모두 막대
+ * 57~76 · 검색 pill 12~60 → 3px 겹침, 남은 틈은 20px인데 막대가 19px이다).
+ *
+ * 그래서 "가시 공간이 충분한가"를 먼저 본다. 상단바 아래와 시트 위 사이의 **실제 틈**이
+ * 막대 높이 + 위아래 여유보다 좁으면 SDK가 놓은 자리로 둔다. full에서 시트가 그 자리를
+ * 덮어 막대가 보이지 않는 것은 **기존 레이아웃의 결과**이며 Fable이 명시적으로 허용했다 —
+ * full은 지도 대부분을 일부러 가리는 상태다. **우리가 막대를 숨기는 것이 아니다**(감추는
+ * 스타일을 주지 않는다. 자리만 SDK 기본값으로 되돌린다).
+ *
+ * 뷰포트 높이나 스냅 이름을 박아 두지 않고 **그때그때 잰 틈**으로 판단하므로, 시트 높이
+ * 규칙이나 상단바 높이가 바뀌어도 따라간다.
+ *
  * ## 찾는 방법
  *
  * 클래스가 없는 요소라 구조 인덱스(`children[1]`)로 집으면 SDK 판이 바뀔 때 조용히
@@ -285,6 +303,7 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
   const barRef = useRef<HTMLElement | null>(null)
   const barBaseBottomRef = useRef<string | null>(null)
   const attributionInsetRef = useRef(0)
+  const attributionTopInsetRef = useRef(0)
   const [status, setStatus] = useState<MapStatus>(JS_KEY ? 'loading' : 'disabled')
   const [attempt, setAttempt] = useState(0)
 
@@ -326,13 +345,25 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
     if (bar === null) return
     // SDK가 준 자리를 한 번 기억한다. 빈 문자열로 지우면 SDK의 인라인 값까지 함께 지워진다.
     if (barBaseBottomRef.current === null) barBaseBottomRef.current = bar.style.bottom || '0px'
+    const base = barBaseBottomRef.current
     const inset = attributionInsetRef.current
-    bar.style.bottom = inset > 0 ? `${Math.round(inset) + ATTRIBUTION_GAP}px` : barBaseBottomRef.current
+    if (inset <= 0) {
+      bar.style.bottom = base // 데스크톱 패널 배치: 시트가 없다.
+      return
+    }
+    // 상단바 아래 ~ 시트 위의 **실제 틈**. 막대와 위아래 여유가 들어가야 올린다.
+    // 값은 매번 다시 재므로 스냅을 오가도 상태가 쌓이지 않는다.
+    const usableGap = host.clientHeight - inset - attributionTopInsetRef.current
+    const requiredGap = bar.offsetHeight + ATTRIBUTION_GAP * 2
+    bar.style.bottom =
+      usableGap >= requiredGap ? `${Math.round(inset) + ATTRIBUTION_GAP}px` : base
   }, [])
 
   const setAttributionInset = useCallback(
-    (bottomInset: number) => {
-      attributionInsetRef.current = Number.isFinite(bottomInset) ? Math.max(0, bottomInset) : 0
+    (bottomInset: number, topInset = 0) => {
+      const clamp = (value: number) => (Number.isFinite(value) ? Math.max(0, value) : 0)
+      attributionInsetRef.current = clamp(bottomInset)
+      attributionTopInsetRef.current = clamp(topInset)
       applyAttributionInset()
     },
     [applyAttributionInset],

@@ -48,11 +48,20 @@ export interface FakeMap extends FakeTarget {
 export const FAKE_MAP_LAYERS = 3
 
 /**
+ * 실제 SDK가 그리는 저작권·축척 막대의 높이(px). 2026-09-13 실측값이다.
+ *
+ * jsdom은 레이아웃을 하지 않아 `offsetHeight`가 언제나 0이다. 훅은 "이 막대가 남은 틈에
+ * 들어가는가"를 그 값으로 판단하므로, **가짜가 실제 크기를 말해 주지 않으면 검사가 규칙을
+ * 확인하지 못한다.**
+ */
+export const FAKE_ATTRIBUTION_BAR_H = 19
+
+/**
  * 실제 SDK가 컨테이너 안에 붙이는 **저작권·축척 막대**의 모양.
  *
  * 2026-09-13 실제 카카오 SDK에서 읽은 것을 그대로 옮겼다: 클래스 없는 `div`가 host의
  * 직계 자식이고 인라인으로 `position:absolute; bottom:0; left:0`, 그 안에 축척 막대와
- * 32×10 카카오 로고 링크(`a[href*="map.kakao.com"]`)가 있다.
+ * 32×10 카카오 로고 링크(`a[href*="map.kakao.com"]`)가 있다. 높이는 19px이다.
  *
  * 가짜가 이걸 만들지 않으면 **"저작권이 시트에 가렸다"를 검사가 볼 수 없다** — 훅은
  * 로고 링크를 기준으로 막대를 찾기 때문이다.
@@ -71,6 +80,7 @@ function appendCopyrightBar(container: HTMLElement): void {
   logo.alt = 'Kakao 맵으로 이동(새창열림)'
   link.appendChild(logo)
   bar.append(scale, link)
+  Object.defineProperty(bar, 'offsetHeight', { configurable: true, value: FAKE_ATTRIBUTION_BAR_H })
   container.appendChild(bar)
 }
 

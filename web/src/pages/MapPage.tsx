@@ -281,7 +281,7 @@ export function MapPage() {
       insetRef.current = 0
       insetLayoutRef.current = 'panel'
       setBottomInset(0)
-      map.setAttributionInset(0)
+      map.setAttributionInset(0, 0) // 패널 배치에는 시트도 플로팅 상단바도 없다.
       return
     }
     // 시트 높이는 Sheet가 onHeightChange로 알려준다. 그 전까지는 패널의 0을 쓰지 않는다.
@@ -316,8 +316,9 @@ export function MapPage() {
       insetRef.current = inset
       insetLayoutRef.current = layout
       setBottomInset(inset)
-      // 카카오 저작권·축척 막대를 시트 위로 올린다(Fable delta QA 2026-09-13).
-      map.setAttributionInset(inset)
+      // 카카오 저작권·축척 막대를 시트 위로 올린다(Fable delta QA 2026-09-13). 상단바가 가린
+      // 높이도 함께 넘긴다 — 위아래가 가리고 남은 틈이 좁으면 훅이 올리지 않는다(full 스냅).
+      map.setAttributionInset(inset, layout === 'sheet' ? TOPBAR_H : 0)
       if (centerPending.current && fixedRef.current !== null) {
         centerPending.current = false
         map.centerOn(fixedRef.current, inset)
