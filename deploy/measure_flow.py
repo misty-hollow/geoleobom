@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import subprocess
 import sys
@@ -116,6 +117,52 @@ def measure_analyze(
 MIN_GEOMETRY_POINTS = 2
 
 
+def geometry_problem(body: Any) -> str | None:
+    """그릴 수 있는 `LineString`인지 본다. 문제가 있으면 그 이유를, 없으면 `None`.
+
+    ## 개수만 세면 통과하는 것들 (2026-09-13, Astra delta D2)
+
+    예전에는 `len(coordinates)`만 봤다. 그래서 **200이고 길이가 2이기만 하면** 무엇이든
+    성공이었다. Astra가 그대로 넣어 확인한 것들:
+
+        {"type": "LineString", "coordinates": [null, null]}   -> rounds_complete=2, exit 0
+        {"type": "Polygon",    "coordinates": [[..], [..]]}   -> rounds_complete=2, exit 0
+
+    둘 다 화면에 선을 그릴 수 없다. 게이트 2가 재라고 한 것은 "검색 → 분석 → **경로
+    표시**"까지의 시간인데(v2.4 10절), 그릴 것이 없는 회차를 섞으면 재지 못한 것을 잰
+    것처럼 보고하게 된다.
+
+    그래서 **그릴 수 있는 최소 조건**까지 본다. 계약(`/api/route`)이 정한 모양 그대로이며
+    그 밖의 추측 검증은 넣지 않는다 — 좌표 범위나 단조성 같은 것은 여기서 판단하지 않는다.
+    """
+    if not isinstance(body, dict):
+        return "본문이 JSON 객체가 아니다"
+    geometry = body.get("geometry")
+    if not isinstance(geometry, dict):
+        return "geometry가 없다"
+    kind = geometry.get("type")
+    if kind != "LineString":
+        return f"geometry.type이 LineString이 아니다({kind!r})"
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list):
+        return "coordinates가 배열이 아니다"
+    if len(coordinates) < MIN_GEOMETRY_POINTS:
+        return f"geometry 점 {len(coordinates)}개"
+    for index, point in enumerate(coordinates):
+        if not isinstance(point, (list, tuple)):
+            return f"coordinates[{index}]가 좌표 쌍이 아니다({point!r})"
+        if len(point) < 2:
+            return f"coordinates[{index}]에 값이 {len(point)}개다"
+        for value in point[:2]:
+            # `bool`은 `int`의 하위형이라 따로 막는다. `json.loads`는 표준 밖의
+            # `NaN`·`Infinity`도 읽으므로 유한한 수인지까지 본다.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return f"coordinates[{index}]에 수가 아닌 값이 있다({value!r})"
+            if not math.isfinite(value):
+                return f"coordinates[{index}]에 유한하지 않은 값이 있다({value!r})"
+    return None
+
+
 def measure_route(
     base_url: str, lon: float, lat: float, fid: int, timeout_s: float
 ) -> dict[str, Any]:
@@ -124,18 +171,17 @@ def measure_route(
         {"lon": f"{lon:.5f}", "lat": f"{lat:.5f}", "fid": str(fid)}
     )
     body, elapsed, status = _get(f"{base_url.rstrip('/')}/api/route?{query}", timeout_s)
-    points = 0
-    if status == 200 and isinstance(body, dict):
-        geometry = body.get("geometry")
-        coordinates = (
-            geometry.get("coordinates") if isinstance(geometry, dict) else None
-        )
-        points = len(coordinates) if isinstance(coordinates, list) else 0
+    coordinates = None
+    if isinstance(body, dict) and isinstance(body.get("geometry"), dict):
+        coordinates = body["geometry"].get("coordinates")
+    points = len(coordinates) if isinstance(coordinates, list) else 0
+    problem = geometry_problem(body) if status == 200 else f"route {status}"
     return {
         "status": status,
         "client_ms": round(elapsed, 1),
         "geometry_points": points,
-        "ok": status == 200 and points >= MIN_GEOMETRY_POINTS,
+        "geometry_problem": problem,
+        "ok": problem is None,
     }
 
 
@@ -246,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             problems.append(
                 f"route {route['status']}"
                 if route["status"] != 200
-                else f"route 200이지만 geometry 점 {route['geometry_points']}개"
+                else f"route 200이지만 {route['geometry_problem']}"
             )
 
         rounds.append(

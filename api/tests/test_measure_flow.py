@@ -85,6 +85,10 @@ def test_a_route_failure_is_not_a_pass(measure_flow, monkeypatch, capsys):
     assert report["client_perceived_ms"]["flow"] is None
 
 
+def _line(coordinates: Any) -> dict[str, Any]:
+    return {"geometry": {"type": "LineString", "coordinates": coordinates}}
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -93,6 +97,27 @@ def test_a_route_failure_is_not_a_pass(measure_flow, monkeypatch, capsys):
         pytest.param({"geometry": {"coordinates": []}}, id="빈 좌표"),
         pytest.param({"geometry": {"coordinates": [[127.14, 36.47]]}}, id="점 하나"),
         pytest.param(None, id="본문이 JSON 객체가 아님"),
+        # --- Astra delta D2의 반례 ---
+        #
+        # 예전에는 `len(coordinates)`만 봤다. 길이가 2이기만 하면 **무엇이든** 성공이라
+        # 아래 둘이 `rounds_complete=2`, `exit 0`으로 통과했다. 화면에 그릴 수 없는
+        # 값인데 게이트 2 흐름 표본에 들어갔다.
+        pytest.param(_line([None, None]), id="Astra: 좌표가 null 둘"),
+        pytest.param(
+            {"geometry": {"type": "Polygon", "coordinates": [[127.1, 36.4], [127.2, 36.5]]}},
+            id="Astra: type이 Polygon",
+        ),
+        pytest.param(_line([[127.1], [127.2, 36.5]]), id="좌표 행에 값이 하나"),
+        pytest.param(_line([["x", 36.4], [127.2, 36.5]]), id="좌표가 문자열"),
+        pytest.param(_line([[float("nan"), 36.4], [127.2, 36.5]]), id="좌표가 NaN"),
+        pytest.param(_line([[float("inf"), 36.4], [127.2, 36.5]]), id="좌표가 Infinity"),
+        pytest.param(_line([[True, 36.4], [127.2, 36.5]]), id="좌표가 bool"),
+        pytest.param(_line([[127.1, 36.4], "not-a-point"]), id="좌표 행이 문자열"),
+        pytest.param(
+            {"geometry": {"type": "LineString", "coordinates": "x"}},
+            id="coordinates가 문자열",
+        ),
+        pytest.param(_line(None), id="coordinates가 null"),
     ],
 )
 def test_a_malformed_route_is_not_a_pass(measure_flow, monkeypatch, capsys, body):
@@ -101,6 +126,38 @@ def test_a_malformed_route_is_not_a_pass(measure_flow, monkeypatch, capsys, body
     capsys.readouterr()
     assert code == 1, f"malformed route({body})인데 통과로 끝났다"
     assert report["rounds_complete"] == 0
+    # 실패한 회차를 흐름 표본에 넣지 않는다.
+    assert report["client_perceived_ms"]["flow"] is None
+
+
+@pytest.mark.parametrize(
+    "coordinates",
+    [
+        pytest.param([[127.1, 36.4], [127.2, 36.5]], id="두 점"),
+        pytest.param([[127.1, 36.4], [127.2, 36.5], [127.3, 36.6]], id="세 점"),
+        pytest.param([[127, 36], [127.2, 36.5]], id="정수 좌표"),
+        # 계약이 세 번째 값을 금지하지 않는다. 추측 검증을 넣지 않았다는 대조군이다.
+        pytest.param([[127.1, 36.4, 0], [127.2, 36.5, 0]], id="고도까지 있는 좌표"),
+    ],
+)
+def test_a_drawable_line_string_passes(measure_flow, monkeypatch, capsys, coordinates):
+    """**대조군.** 정상 LineString을 거부하면 게이트 2를 아예 잴 수 없다."""
+    code, report = _run(measure_flow, monkeypatch, route_status=200, route_body=_line(coordinates))
+    capsys.readouterr()
+    assert code == 0, f"정상 경로({coordinates})를 실패로 셌다"
+    assert report["rounds_complete"] == 2
+    assert report["client_perceived_ms"]["flow"]["n"] == 2
+
+
+def test_the_failure_says_which_part_of_the_geometry_was_wrong(measure_flow, monkeypatch, capsys):
+    """ "200이지만 실패"의 이유가 사람에게 보여야 다음 사람이 고칠 수 있다."""
+    code, report = _run(measure_flow, monkeypatch, route_status=200, route_body=_line([None, None]))
+    out = capsys.readouterr()
+    assert code == 1
+    assert "LineString" in measure_flow.geometry_problem({"geometry": {"type": "Polygon"}})
+    reasons = [problem for row in report["failed_rounds"] for problem in row["problems"]]
+    assert any("coordinates[0]" in reason for reason in reasons), reasons
+    assert "coordinates[0]" in out.out + out.err
 
 
 def test_a_flow_without_a_routable_facility_is_not_a_pass(measure_flow, monkeypatch, capsys):
