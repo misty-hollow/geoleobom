@@ -26,11 +26,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -384,10 +386,66 @@ def fetch_page(base_url: str, path: str, timeout_s: float) -> tuple[int, str, st
         )
 
 
-def check_pages(
-    base_url: str, *, probe_path: str, expect_asset: str | None, timeout_s: float
+ASSET_PATTERN = re.compile(r'(?:src|href)="(/assets/[A-Za-z0-9._-]+)"')
+
+
+def fetch_asset(base_url: str, path: str, timeout_s: float) -> tuple[int, int]:
+    """(상태코드, 바이트 수). 자산은 HTML이 아니라 **실제로 받아** 본다."""
+    url = f"{base_url.rstrip('/')}{path}"
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(url), timeout=timeout_s
+        ) as response:
+            return response.status, len(response.read())
+    except urllib.error.HTTPError as exc:
+        exc.read()
+        return exc.code, 0
+
+
+def check_assets(
+    base_url: str, html: str, timeout_s: float, *, label: str
 ) -> list[str]:
-    """`/`와 공유 URL이 실제 React 앱을 200으로 돌려주는지 확인한다."""
+    """HTML이 가리키는 JS·CSS를 **실제로 GET 한다** (2026-09-13, Astra finding 9).
+
+    이름이 본문에 있는지만 보면 배포 전환 중 404를 잡지 못한다. 사용자가 A의 HTML을
+    받은 뒤 current가 B로 넘어가면 A의 자산은 B 디렉터리에 없고, 그 요청이 404면
+    화면이 그 자리에서 깨진다. 그 경로를 여기서 밟는다.
+    """
+    problems: list[str] = []
+    assets = sorted(set(ASSET_PATTERN.findall(html)))
+    if not assets:
+        return [f"{label}: HTML이 /assets/ 자산을 하나도 가리키지 않는다"]
+    for asset in assets:
+        try:
+            status, size = fetch_asset(base_url, asset, timeout_s)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            problems.append(f"{label}: {asset} 요청 실패 {exc}")
+            continue
+        if status != 200:
+            problems.append(
+                f"{label}: {asset}가 HTTP {status} — HTML은 200인데 자산이 없다. "
+                "배포 전환 중이면 직전 배포본에서도 찾는지 확인해라"
+            )
+        elif size == 0:
+            problems.append(f"{label}: {asset}가 빈 응답이다")
+    return problems
+
+
+def check_pages(
+    base_url: str,
+    *,
+    probe_path: str,
+    expect_asset: str | None,
+    timeout_s: float,
+    check_assets_too: bool = False,
+    also_expect_assets: Sequence[str] = (),
+) -> list[str]:
+    """`/`와 공유 URL이 실제 React 앱을 200으로 돌려주는지 확인한다.
+
+    `check_assets_too`면 그 HTML이 가리키는 자산까지 실제로 받아 본다.
+    `also_expect_assets`는 **전환 직전 HTML이 가리키던** 자산이다 — 전환 뒤에도 열려야
+    열어 둔 탭이 깨지지 않는다(Astra finding 9).
+    """
     problems: list[str] = []
     for path in ("/", probe_path):
         try:
@@ -417,6 +475,22 @@ def check_pages(
             problems.append(
                 f"{path}: 이번 빌드의 자산({expect_asset})을 가리키지 않는다. "
                 "옛 배포본이 그대로 서빙되고 있다"
+            )
+        if check_assets_too:
+            problems.extend(check_assets(base_url, body, timeout_s, label=path))
+
+    # 전환 직전 HTML이 가리키던 자산. 이미 그 HTML을 받아 둔 브라우저가 지금 요청한다.
+    for asset in also_expect_assets:
+        path = asset if asset.startswith("/") else f"/{asset}"
+        try:
+            status, _ = fetch_asset(base_url, path, timeout_s)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            problems.append(f"직전 자산 {path}: 요청 실패 {exc}")
+            continue
+        if status != 200:
+            problems.append(
+                f"직전 자산 {path}: HTTP {status} — 전환 전에 HTML을 받은 브라우저가 "
+                "그 자산을 못 받는다. 열어 둔 탭이 그 자리에서 깨진다"
             )
     return problems
 
@@ -461,6 +535,20 @@ def main(argv: list[str] | None = None) -> int:
         "--expect-asset",
         help="index.html이 이 자산 이름을 가리켜야 한다 (방금 올린 빌드인지 확인)",
     )
+    parser.add_argument(
+        "--check-assets",
+        action="store_true",
+        help="HTML이 가리키는 JS·CSS를 실제로 GET 해 200인지 본다 "
+        "(이름이 본문에 있는지만 보면 전환 중 404를 놓친다)",
+    )
+    parser.add_argument(
+        "--expect-previous-asset",
+        action="append",
+        default=[],
+        metavar="/assets/index-XXXX.js",
+        help="전환 **직전** HTML이 가리키던 자산. 전환 뒤에도 200이어야 열어 둔 탭이 "
+        "깨지지 않는다. 여러 번 줄 수 있다",
+    )
     args = parser.parse_args(argv)
 
     if args.pages_only:
@@ -469,6 +557,8 @@ def main(argv: list[str] | None = None) -> int:
             probe_path=args.probe_path,
             expect_asset=args.expect_asset,
             timeout_s=args.timeout,
+            check_assets_too=args.check_assets,
+            also_expect_assets=args.expect_previous_asset,
         )
         if problems:
             print("== 페이지 확인 실패 ==", file=sys.stderr)
@@ -582,6 +672,8 @@ def main(argv: list[str] | None = None) -> int:
                 probe_path=args.probe_path,
                 expect_asset=args.expect_asset,
                 timeout_s=args.timeout,
+                check_assets_too=args.check_assets,
+                also_expect_assets=args.expect_previous_asset,
             )
         )
 

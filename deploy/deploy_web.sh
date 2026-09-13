@@ -12,7 +12,19 @@
 #   1. 그 커밋의 web/을 꺼내 **깨끗한 트리에서** npm ci + build 한다.
 #   2. 결과물을 서버 /srv/geoleobom/web/<커밋 SHA>/ 로 올린다(스테이징 후 원자적 이동).
 #   3. previous <- 지금 current, current <- 새 버전 으로 링크를 옮긴다.
-#   4. 공개 사이트에서 `/`와 `/p/{좌표}`가 **200이고 방금 만든 자산을 가리키는지** 확인한다.
+#   4. 공개 사이트에서 `/`와 `/p/{좌표}`가 **200이고 방금 만든 자산을 실제로 받는지**,
+#      그리고 **전환 직전 HTML이 가리키던 자산도 여전히 열리는지** 확인한다.
+#
+# ## 릴리스 디렉터리는 불변이다 (2026-09-13, Astra finding 4)
+#
+# 예전에는 3단계가 `rm -rf '$COMMIT_SHA'` 뒤에 스테이징을 그 자리에 옮겼다. 같은 커밋을
+# 다른 JS 키로 다시 빌드하면 바이트가 달라지는데 이름은 그대로라 **릴리스 ID가 무엇을
+# 가리키는지 말할 수 없게** 되고, `previous`가 그 SHA를 가리키고 있으면 **롤백 대상을
+# 지우며**, 지우고 옮기는 사이에 그 디렉터리가 비어 있다.
+#
+# 지금은 지문(파일 이름 + 내용의 해시)을 서로 대조한다. 같으면 있던 것을 그대로 쓰고,
+# 다르면 아무것도 건드리지 않고 멈춘다. 서버에서 도는 그 로직은 `deploy/web_release.sh`에
+# 있고 `deploy/web_release_test.sh`가 같은 함수를 실제로 돌려 검사한다.
 #
 # ## 왜 코드(API) 배포와 분리하는가
 #
@@ -126,6 +138,14 @@ if [[ -z "$MAIN_ASSET" ]]; then
 fi
 echo "   자산 지문: $MAIN_ASSET"
 
+# 올릴 바이트의 지문. 서버가 같은 값을 다시 계산해 대조한다 — 전송 손상도, 같은
+# 릴리스 ID에 다른 산출물이 이미 있는 것도 이 한 값으로 잡힌다.
+RELEASE_LIB="$REPO_ROOT/deploy/web_release.sh"
+# shellcheck source=deploy/web_release.sh
+. "$RELEASE_LIB"
+DIGEST="$(release_digest "$DIST")"
+echo "   릴리스 지문: $DIGEST"
+
 echo "== 2. 서버로 업로드 ($WEB_ROOT/$COMMIT_SHA)"
 STAGING_REMOTE="$WEB_ROOT/.staging-$COMMIT_SHA"
 ssh "$HOST" "rm -rf '$STAGING_REMOTE' && mkdir -p '$STAGING_REMOTE'"
@@ -133,27 +153,34 @@ ssh "$HOST" "rm -rf '$STAGING_REMOTE' && mkdir -p '$STAGING_REMOTE'"
 # **현재 서빙되는 디렉터리에 남지 않는다**(스테이징에만 쌓인다).
 tar -C "$DIST" -czf - . | ssh "$HOST" "tar -xzf - -C '$STAGING_REMOTE'"
 
-echo "== 3. current 전환"
+# 전환 **직전** 사이트가 가리키던 자산을 적어 둔다 (2026-09-13, Astra finding 9).
+#
+# 이미 그 HTML을 받아 둔 브라우저(열어 둔 탭, 느린 회선, 프리페치)는 전환 뒤에 그
+# 자산을 요청한다. 새 배포본에는 없는 이름이므로, Caddy가 직전 배포본에서도 찾아
+# 주지 않으면 404다. 4단계에서 그 경로를 **실제로 밟아** 확인한다.
+PREVIOUS_ASSETS="$(curl -fsS --max-time 20 "$BASE_URL/" 2>/dev/null |
+	grep -o '/assets/[A-Za-z0-9._-]*' | LC_ALL=C sort -u || true)"
+if [[ -n "$PREVIOUS_ASSETS" ]]; then
+	echo "   전환 전 자산: ${PREVIOUS_ASSETS//$'\n'/ }"
+else
+	echo "   전환 전 자산: (없음 — 첫 배포이거나 사이트가 아직 응답하지 않는다)"
+fi
+
+echo "== 3. 릴리스 설치와 current 전환"
+# 서버에서 도는 로직은 deploy/web_release.sh 한 벌뿐이다. 그대로 실어 보낸다 —
+# 검사(deploy/web_release_test.sh)가 돌리는 것과 같은 코드여야 한다.
 ssh "$HOST" "bash -s" <<REMOTE
 set -euo pipefail
+$(cat "$RELEASE_LIB")
+
+test -f '$STAGING_REMOTE/$MAIN_ASSET' || { echo "업로드에 $MAIN_ASSET 이 없다" >&2; exit 1; }
+
+# 이미 있는 릴리스는 **지우지 않는다.** 같은 바이트면 그대로 쓰고, 다르면 멈춘다.
+outcome="\$(install_release '$WEB_ROOT' '$COMMIT_SHA' '$STAGING_REMOTE' '$DIGEST')"
+echo "   릴리스 \$outcome"
+
+switch_current '$WEB_ROOT' '$COMMIT_SHA'
 cd "$WEB_ROOT"
-
-test -f '$STAGING_REMOTE/index.html' || { echo "업로드가 온전하지 않다"; exit 1; }
-test -f '$STAGING_REMOTE/$MAIN_ASSET' || { echo "업로드에 $MAIN_ASSET 이 없다"; exit 1; }
-
-# 같은 커밋을 다시 배포할 수 있다. 기존 디렉터리를 지우고 스테이징을 그 자리에 놓는다.
-rm -rf '$COMMIT_SHA'
-mv '$STAGING_REMOTE' '$COMMIT_SHA'
-
-# 되돌릴 곳을 남긴다. 첫 배포라 current가 없으면 previous도 만들지 않는다.
-if [[ -L current ]]; then
-	PREV="\$(readlink current)"
-	if [[ "\$PREV" != "$COMMIT_SHA" ]]; then
-		ln -sfn "\$PREV" previous
-	fi
-fi
-# 상대 링크여야 컨테이너 안(/srv/web)에서도 풀린다.
-ln -sfn '$COMMIT_SHA' current
 ls -l current previous 2>/dev/null || ls -l current
 REMOTE
 
@@ -164,14 +191,23 @@ echo "== 4. 공개 사이트 확인 (/ 와 $PROBE_PATH)"
 # current를 옮긴 뒤 4단계 확인만 "getaddrinfo failed"로 죽어, 배포는 됐는데 실패한
 # 것처럼 보인다. docker 호출에 같은 조치를 하는 data/osrm/run_osrm.sh와 같은 규율이다.
 #
-# **`/p/`만 제외한다.** `MSYS_NO_PATHCONV=1`이나 `MSYS2_ARG_CONV_EXCL='*'`로 통째로 끄면
-# 바로 옆 `$REPO_ROOT/deploy/smoke.py`까지 변환되지 않아 Windows python이 그 파일을
-# 열지 못한다(실제로 그렇게 한 번 깨뜨렸다). Linux에서는 이 변수가 무시된다.
-env MSYS2_ARG_CONV_EXCL='/p/' python "$REPO_ROOT/deploy/smoke.py" \
-	--base-url "$BASE_URL" \
-	--pages-only \
-	--expect-asset "$MAIN_ASSET" \
+# **`/p/`와 `/assets/`만 제외한다.** `MSYS_NO_PATHCONV=1`이나 `MSYS2_ARG_CONV_EXCL='*'`로
+# 통째로 끄면 바로 옆 `$REPO_ROOT/deploy/smoke.py`까지 변환되지 않아 Windows python이 그
+# 파일을 열지 못한다(실제로 그렇게 한 번 깨뜨렸다). Linux에서는 이 변수가 무시된다.
+SMOKE_ARGS=(
+	--base-url "$BASE_URL"
+	--pages-only
+	--expect-asset "$MAIN_ASSET"
 	--probe-path "$PROBE_PATH"
+	# 이름이 HTML 안에 있는지만 보면 부족하다. 그 자산을 **실제로 받아** 200인지 본다.
+	--check-assets
+)
+# 전환 직전 HTML이 가리키던 자산도 여전히 열리는지 본다(Astra finding 9).
+while IFS= read -r asset; do
+	[[ -n "$asset" ]] && SMOKE_ARGS+=(--expect-previous-asset "$asset")
+done <<<"$PREVIOUS_ASSETS"
+
+env MSYS2_ARG_CONV_EXCL='/p/;/assets/' python "$REPO_ROOT/deploy/smoke.py" "${SMOKE_ARGS[@]}"
 
 echo
 echo "웹 배포 완료. 버전: $COMMIT_SHA"

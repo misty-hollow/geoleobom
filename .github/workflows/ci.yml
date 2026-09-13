@@ -46,6 +46,13 @@ jobs:
             bash -n "$script"
           done
 
+      # 문법 검사는 "그런 줄이 있다"만 본다. 릴리스 디렉터리 불변성은 **실제로 돌려**
+      # 확인한다 — 서버에서 도는 바로 그 함수를 임시 디렉터리에서 실행한다.
+      # 심볼릭 링크가 POSIX처럼 동작해야 의미가 있어 ubuntu 러너에서만 돈다
+      # (개발 PC의 Git Bash는 `ln -s`가 복사본을 만든다).
+      - name: Run the web release regression
+        run: bash deploy/web_release_test.sh
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"

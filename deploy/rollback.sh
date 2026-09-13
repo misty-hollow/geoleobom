@@ -271,8 +271,12 @@ REMOTE
 web)
 	# 웹은 버전 디렉터리 + 심볼릭 링크라 **링크만 맞바꾼다.** 어느 쪽도 지우지 않으므로
 	# 다시 앞으로 갈 수 있다(데이터 롤백과 같은 방식).
+	#
+	# 링크 전환은 `deploy/web_release.sh`의 `atomic_link`를 쓴다 — 배포와 롤백이 같은
+	# 방식으로 링크를 걸어야 "전환 중 링크가 없는 순간"이 어느 쪽에도 없다.
 	ssh "$HOST" "bash -s" <<REMOTE
 set -euo pipefail
+$(cat "$REPO_ROOT/deploy/web_release.sh")
 cd "$WEB_ROOT"
 test -L previous || { echo "previous 링크가 없다. 되돌릴 직전 빌드가 없다."; exit 1; }
 
@@ -282,13 +286,16 @@ test "\$PREV" != "\$CURR" || { echo "previous와 current가 같다. 되돌릴 �
 test -f "\$PREV/index.html" || { echo "직전 빌드가 온전하지 않다: \$PREV"; exit 1; }
 
 echo "current=\$CURR -> previous=\$PREV 로 되돌린다"
-ln -sfn "\$CURR" previous
-ln -sfn "\$PREV" current
+# 되돌린 뒤에도 **양쪽 자산이 모두 열려야 한다.** Caddy의 /assets/* 는 current에
+# 없으면 previous에서 찾으므로, 두 링크가 서로를 가리키게 두면 되돌아간 직후에도
+# 방금까지 서빙되던 빌드의 자산이 404가 되지 않는다(Astra finding 9).
+atomic_link "\$CURR" "$WEB_ROOT/previous"
+atomic_link "\$PREV" "$WEB_ROOT/current"
 ls -l current previous
 REMOTE
 	echo
 	echo "웹을 되돌렸다. 실제 응답을 확인하기 전에는 복구됐다고 하지 않는다:"
-	echo "  python deploy/smoke.py --base-url $BASE_URL --pages-only"
+	echo "  python deploy/smoke.py --base-url $BASE_URL --pages-only --check-assets"
 	exit 0
 	;;
 *)
