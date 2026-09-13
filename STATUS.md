@@ -1,6 +1,6 @@
 # 현재 상태 (STATUS.md)
 
-갱신: 2026-09-13 (PR #18 Fable 재-QA attribution 1건 remediation). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
+갱신: 2026-09-13 (PR #18 Astra 최종 delta D1~D4 remediation). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
 
 **이 파일은 현재 상태와 역사 기록을 함께 담는다.** 아래 "지금 동작하는 것"과 "현재
 작업과 다음 행동"이 현재이고, 날짜가 붙은 절(`## … (2026-09-12, …)` 등)은 **그때의
@@ -21,7 +21,23 @@
 
 ## 현재 작업과 다음 행동
 
-- **현재 작업: PR #18의 Fable delta QA 3건 remediation (2026-09-13, Opus 5).** frontend(`web/**`)만 바뀌었고 api·data·deploy는 손대지 않았다.
+- **현재 작업: PR #18의 Astra 최종 delta D1~D4 remediation (2026-09-13, Opus 5).** `deploy/**`·`api/tests/**`·문서만 바뀌었고 **frontend(`web/**`)는 손대지 않았다.**
+  - Astra 최종 delta review가 HEAD `f27584c`에 대해 다시 **FIX THEN MERGE**로 판정했다. merge-blocking 3건(D1~D3)과 비차단 문서 정합성(D4)을 닫았다.
+  - **D1 — Caddy 접근 로그에 `/assets/` 뒤 사용자 문자열이 남았다.** 허용 목록이 자산만 파일명 글자(`[A-Za-z0-9._-]{1,128}`)로 예외를 뒀는데, **그 경로로 무엇을 요청할지는 요청자가 정한다.** 실제 caddy:2.11.4-alpine 재현: `/assets/36.47130-127.14020.js`와 `/assets/AUDIT_PRIVATE_QUERY.js`가 그대로, `/assets/36.47130,127.14020`은 쉼표에서 끊겨 `/assets/36.47130`으로 남았다. 자산도 **`/assets` 한 덩어리**로 줄인다. 파일명은 남지 않는다.
+  - **D2 — `measure_flow.py`가 그릴 수 없는 geometry를 성공으로 셌다.** `len(coordinates)`만 봐서 `LineString + [null, null]`과 `Polygon + 좌표 2개`가 `rounds_complete=2`·`exit 0`이었다. `geometry.type`·좌표 쌍·유한한 수까지 본다(계약 밖 추측 검증은 넣지 않았다).
+  - **D3 — 현재 스모크가 구버전 롤백 산출물에 새 계약을 강제했다.** base `9212bcf`의 API는 `/api/route`가 501이고 그때의 스모크는 `/route`를 부르지 않는다. 그런데 `rollback.sh`는 그 커밋의 설정·이미지를 되돌린 뒤 **작업 트리의** 스모크를 돌리라고 안내했다 — 정상 롤백인데 실패한다. 고친 자리는 검사 논리가 아니라 **어느 검사를 쓰는가**다: 이미 꺼내고 있던 그 커밋의 `deploy/`를 남겨 **그 배포본의 `smoke.py`**를 쓰게 했다. `"501이면 건너뛴다"`는 쓰지 않았다 — 현재 배포본에서 501이면 진짜 결함이다.
+  - **D4 — 문서 정합성.** PROJECT.md 6절이 현재 배포본을 `cc-02`로 읽히게 하던 문단을 **그때의 기록**으로 표시하고 현재가 `cc-03`임을 적었다(역사는 지우지 않았다).
+  - 검사: `api` pytest **409 passed**(신규 D2 9건·D3 5건·D1 16건 포함) · `ruff check`/`format` api·deploy ✓ · 실제 Caddy 로그 검사 **14건 실패 0**. 각 수정은 **고치기 전 코드에서 검사가 실패하는 것**을 확인했다(D1 반례 3종 유출, D2 9건 실패, D3 2건 실패).
+  - **frontend는 재실행하지 않았다.** 변경이 `web/**`에 닿지 않아 실제 카카오 QA·Fable 시각 QA를 반복할 이유가 없다.
+  - **PR #18은 Draft 그대로다. 병합·배포하지 않았다. 새 HEAD는 Astra 재검토도 Fable 재-QA도 받지 않았다.**
+
+- **UX 최종 상태 (2026-09-13, Fable 5.1).** `f27584c` 기준이다.
+  - **Fable 최종 attribution 판정: PASS.** peek·half·full·desktop 모두. 그 앞의 stale inset·focus ring·프레이밍 항목도 같은 HEAD에서 PASS다.
+  - **320×568 half의 top3 셋째 항목 링 바깥 4px은 ACCEPTED NOTE다** — 결함으로 닫지 않았다. 자르는 상자가 아니라 접힘 아래로 넘어간 콘텐츠이고 시트를 올리면 보인다.
+  - **여전히 미검증:** 실기기 iOS Safari·Android Chrome 터치, 모바일 LTE, 운영(LA) 왕복 게이트 2, 운영 Caddy parser 단계의 `%zz`·불완전 UTF-8 URL.
+  - 이 PASS는 `f27584c` 기준이며 **D1~D4 수정 뒤의 HEAD에 대한 승인이 아니다.** 다만 그 수정은 `web/**`에 닿지 않는다.
+
+- **직전 작업: PR #18의 Fable delta QA 3건 + 재-QA 1건 remediation (2026-09-13, Opus 5).** frontend(`web/**`)만 바뀌었고 api·data·deploy는 손대지 않았다.
   - Fable 5.1이 Astra remediation 뒤의 HEAD `abe9961`을 실제 카카오·브라우저에서 사용자-visible delta QA해 3건을 남겼다. 셋 다 닫았다.
   - ① **배치 전환 직후 지도가 이전 배치의 시트 높이로 프레이밍됐다.** 390×844 → 1280×800에서 핀 y≈191·경로 bbox 107~277(1280 직접 진입은 y≈400·229~571). `centerOn`·`setRoute`가 쓰는 inset이 배치가 바뀐 커밋에서 이전 값이었고, inset을 0으로 되돌리는 effect가 프레이밍 effect **뒤에** 선언돼 있었다. inset에 "어느 배치에서 쟀는지"를 함께 들고 어긋나면 프레이밍을 미룬다(`MapPage.tsx`).
   - ② **포커스 링이 상자에 잘렸다.** 담기·공유 윗변 5px(스크롤 상자), top3 항목 오른변 3px·첫 항목 윗변 3px(`overflow: hidden` 접힘 상자). 두께 2px·대비 6.8:1은 정상이었다 — 잘린 이유는 자리다. 담기·공유는 44px 탭 상자를 상자 안으로 들여놓고 링을 안쪽에 그리며(아이콘 위치는 **픽셀 단위로 불변**, A/B 측정으로 확인), top3는 자르는 상자만 좌우 8px 넓혀 내용을 움직이지 않았다.
@@ -35,7 +51,7 @@
     - **막대를 숨기는 것이 아니다.** 감추는 스타일을 주지 않고 자리만 SDK 기본값으로 되돌린다. full에서 시트가 그 자리를 덮어 보이지 않는 것은 기존 레이아웃의 결과이며 Fable이 명시적으로 허용했다(full은 지도 대부분을 일부러 가리는 상태다).
     - 검사는 **스냅마다 다른 규칙**으로 고정했다 — peek·half는 올라감, 틈이 좁은 full과 데스크톱은 SDK 자리. "모바일이면 언제나 보인다"는 불변식은 만들지 않았다. 틈 판단을 빼면 vitest가 실패하는 것을 확인했다.
     - 실제 카카오(390·768·1280) 저작권 검사 89건 실패 0. half → peek → full → half 왕복에도 값이 처음과 같다(drift 없음). 크기 32×10·href·이미지 불변, 막대 옆 지도 pan 정상.
-  - **PR #18은 Draft 그대로다. 병합·배포하지 않았다. 새 HEAD는 Fable 재-QA도 독립 기술 검토도 받지 않았다.**
+  - 이 단위의 결과는 위 "UX 최종 상태"가 말한다 — Fable이 `f27584c`에서 최종 PASS를 냈다.
 
 - **직전 작업: PR #18의 Astra 독립감사 finding 1~11 remediation (2026-09-13, Opus 5).**
   - 브랜치 `feat/week3-search-route-web`, base `origin/main` `9212bcf`. Astra가 검토한 HEAD는 `9d7e04d`이고 그 위에 remediation 커밋을 쌓았다.
