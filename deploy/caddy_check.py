@@ -55,8 +55,12 @@ LAT, LON = "36.47130", "127.14020"
 SECRET_QUERY = "공주대학교신관캠퍼스"
 # 요청 줄은 ASCII다. 브라우저가 보내는 것과 같은 퍼센트 인코딩 형태로 나간다.
 SECRET_QUERY_ENCODED = urllib.parse.quote(SECRET_QUERY)
+# `/assets/` 뒤에 실어 보내는 표식. 파일명 글자 집합([A-Za-z0-9._-]) 안에 있으면서
+# 사람이 정한 문자열이라, "파일명처럼 생겼다"가 안전의 근거가 아님을 보여 준다
+# (Astra delta D1의 반례를 그대로 쓴다).
+ASSET_PROBE = "AUDIT_PRIVATE_QUERY"
 # 로그에는 인코딩된 모양으로 남을 것이므로 **둘 다** 없는지 본다.
-SECRETS = (LAT, LON, SECRET_QUERY, SECRET_QUERY_ENCODED)
+SECRETS = (LAT, LON, SECRET_QUERY, SECRET_QUERY_ENCODED, ASSET_PROBE)
 
 # 자산 이름은 내용 해시라 민감값이 아니다. 전환 검사에서 이름으로 구분한다.
 OLD_ASSET = "index-OLDoldOLD.js"
@@ -205,6 +209,15 @@ def main(argv: list[str] | None = None) -> int:
             ("쿼리 문자열(search)", f"/api/search?q={SECRET_QUERY_ENCODED}", None),
             ("비교 URL 쿼리", f"/c?p={LAT},{LON}&p=36.4,127.1", None),
             ("알 수 없는 경로", f"/../../{LAT},{LON}", None),
+            # Astra delta D1: `/assets/` 뒤 문자열도 **요청자가 정한다.** 파일이 없어
+            # 404여도 로그에는 남았다. 글자 집합이 파일명처럼 생겼다는 것은 출처의
+            # 증거가 아니다 — 좌표도 검색어도 그 집합에 들어간다.
+            ("자산 경로에 좌표", f"/assets/{LAT}-{LON}.js", None),
+            ("자산 경로에 문장", f"/assets/{ASSET_PROBE}.js", None),
+            ("자산 경로에 쉼표 좌표", f"/assets/{LAT},{LON}", None),
+            ("자산 하위 경로", f"/assets/sub/{LAT}-{LON}.js", None),
+            ("자산 경로 인코딩", f"/assets/%2e%2e/{LAT},{LON}", None),
+            ("정상 해시 자산(대조군)", f"/assets/{NEW_ASSET}", None),
             (
                 "Referer 헤더",
                 "/api/health",
@@ -245,8 +258,16 @@ def main(argv: list[str] | None = None) -> int:
             "/api/analyze" in uris
             and "/api/search" in uris
             and "/p" in uris
-            and "/c" in uris,
-            f"기록된 값: {sorted(set(uris))[:10]}",
+            and "/c" in uris
+            and "/assets" in uris,
+            f"기록된 값: {sorted(set(uris))[:12]}",
+        )
+        # 자산은 **템플릿 한 덩어리**로만 남는다. 파일명이 붙어 있으면 안 된다.
+        asset_uris = [uri for uri in uris if uri.startswith("/assets")]
+        report.check(
+            "자산 요청은 '/assets'로만 기록된다(파일명 없음)",
+            bool(asset_uris) and all(uri == "/assets" for uri in asset_uris),
+            f"기록된 값: {sorted(set(asset_uris))[:6]}",
         )
 
         # --- 2. 자산 전환 (finding 9) -----------------------------------------

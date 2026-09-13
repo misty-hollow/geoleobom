@@ -25,6 +25,7 @@ reverse_proxy 실패 같은 오류는 **전역 기본 로거**로 나가 필터�
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -68,11 +69,18 @@ ALLOWED_FORMAT_LINES = frozenset({"wrap console", f"import {SHARED_SNIPPET}"})
 # 지금은 아는 경로 템플릿으로 시작할 때만 그것을 남기고 나머지는 통째로 버린다.
 # 기본값이 "남기지 않음"이라 새 모양이 생겨도 새지 않는다. 실제 동작은
 # `deploy/caddy_check.py`가 Caddy를 띄워 확인한다 — 이 파일은 설정 구조만 본다.
-URI_FILTER = (
-    'request>uri regexp "(?s)^(/api/(?:analyze|route|search|health)'
-    "|/assets/[A-Za-z0-9._-]{1,128}|/about|/index[.]html|/favicon[.]svg"
-    '|/search|/c|/p|/)?.*$" "$1"'
+#
+# **자산 파일명도 남기지 않는다** (2026-09-13, Astra delta D1). 예전에는 `/assets/` 뒤
+# 파일명을 `[A-Za-z0-9._-]{1,128}`로 한정해 그대로 남겼다. 그런데 그 경로로 무엇을
+# 요청할지는 요청자가 정하고, 파일이 없으면 404일 뿐 로그에는 남는다. 실제 Caddy로
+# 재현한 유출: `/assets/36.47130-127.14020.js`, `/assets/AUDIT_PRIVATE_QUERY.js`,
+# `/assets/36.47130,127.14020`(쉼표에서 끊겨 절반). 지금은 `/assets` 한 덩어리다.
+URI_PATTERN = (
+    "(?s)^(/api/(?:analyze|route|search|health)"
+    "|/assets|/about|/index[.]html|/favicon[.]svg"
+    "|/search|/c|/p|/)?.*$"
 )
+URI_FILTER = f'request>uri regexp "{URI_PATTERN}" "$1"'
 
 # 공유 스니펫 본문에 허용하는 줄. **목록 밖의 줄은 무엇이든 거부한다.**
 # 필드 이름을 따옴표로 감싸거나(`"request>headers>Referer" regexp …`) 다른 스니펫을
@@ -257,6 +265,64 @@ def test_the_shared_snippet_strips_the_query_string_and_the_path_parameter(caddy
     assert uri_lines[0] == URI_FILTER, f"정규식이나 치환값이 바뀌었다: {uri_lines[0]}"
     # `\?`는 Caddyfile에서 "선택적 백슬래시"로 해석돼 경로 전체가 지워진다.
     assert "\\?" not in snippet
+
+
+# 요청 경로 -> 로그에 남기를 바라는 값.
+#
+# 앞의 다섯은 Astra가 실제 Caddy에서 유출을 확인한 반례다(delta D1, finding 3).
+# 뒤의 것들은 **대조군**이다 — 필터가 전부 지워 버리는 상태도 통과로 보이면 안 된다.
+REDACTION_CASES = (
+    ("/assets/36.47130-127.14020.js", "/assets"),
+    ("/assets/AUDIT_PRIVATE_QUERY.js", "/assets"),
+    ("/assets/36.47130,127.14020", "/assets"),
+    ("/assets/sub/36.47130-127.14020.js", "/assets"),
+    ("/%70/36.47130,127.14020", "/"),
+    ("/p/36.47130,127.14020", "/p"),
+    ("/assets/index-AbC123.js", "/assets"),
+    ("/api/analyze?lon=127.14020&lat=36.47130", "/api/analyze"),
+    ("/api/search?q=%EA%B3%B5%EC%A3%BC", "/api/search"),
+    ("/c?p=36.47130,127.14020", "/c"),
+    ("/about", "/about"),
+    ("/../../36.47130,127.14020", "/"),
+)
+
+
+@pytest.mark.parametrize(("uri", "expected"), REDACTION_CASES)
+def test_the_uri_pattern_leaves_only_the_route_template(caddyfile, uri, expected):
+    """정규식을 **돌려서** 무엇이 남는지 본다.
+
+    구조 검사는 "이 줄이 있다"만 말한다. 예전 자산 예외
+    (`/assets/[A-Za-z0-9._-]{1,128}`)는 그 검사를 통과하면서도 파일명을 그대로 남겼다 —
+    글자 집합이 파일명처럼 생겼는지를 볼 뿐 **그 문자열을 누가 정했는지**는 보지 않기
+    때문이다. 그래서 여기서 치환 결과를 직접 확인한다.
+
+    Caddy는 Go `regexp`(RE2)를, 이 검사는 Python `re`를 쓴다. 둘 다 교체 후보를
+    **왼쪽부터** 고르므로 이 패턴에서는 결과가 같다. 그래도 최종 권한은 실제 Caddy를
+    띄우는 `deploy/caddy_check.py`에 있고, 여기서는 설정이 조용히 느슨해지는 것을 CI가
+    잡게 하는 것이 목적이다.
+    """
+    # 설정 파일에 실제로 적힌 정규식을 쓴다. 상수만 고치고 Caddyfile을 놓치면 실패한다.
+    assert URI_FILTER in _code_lines(_snippet(caddyfile)) or any(
+        line.strip() == URI_FILTER for line in _code_lines(_snippet(caddyfile))
+    ), "Caddyfile의 uri 필터가 이 검사의 패턴과 다르다"
+    pattern = re.compile(URI_PATTERN)
+    match = pattern.fullmatch(uri)
+    assert match is not None, f"패턴이 {uri!r}에 아예 맞지 않는다"
+    assert match.group(1) == expected, f"{uri!r} -> {match.group(1)!r}"
+
+
+@pytest.mark.parametrize(
+    "secret", ["36.47130", "127.14020", "AUDIT_PRIVATE_QUERY", "%EA%B3%B5%EC%A3%BC"]
+)
+def test_no_case_leaves_a_caller_chosen_fragment(caddyfile, secret):
+    """위 표의 **어떤 경로에서도** 사용자가 정한 조각이 남지 않는다."""
+    pattern = re.compile(URI_PATTERN)
+    leaking = [
+        uri
+        for uri, _ in REDACTION_CASES
+        if secret in uri and secret in (pattern.fullmatch(uri).group(1) or "")
+    ]
+    assert not leaking, f"{secret!r}가 남는다: {leaking}"
 
 
 @pytest.mark.parametrize("field", DELETED_FIELDS)

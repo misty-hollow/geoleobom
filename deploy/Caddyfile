@@ -50,16 +50,30 @@
 #   /p/36.47130,127.14020          -> /p
 #   /%70/36.47130,127.14020        -> /          (템플릿에 없다 -> 통째로 버린다)
 #   /c?p=36.4,127.1&p=36.5,127.2   -> /c
-#   /assets/index-AbC123.js        -> 그대로     (내용 해시라 민감값이 아니다)
+#   /assets/index-AbC123.js        -> /assets
 #
-# `/assets/`는 파일명 글자를 `[A-Za-z0-9._-]`로 한정한다. `%`가 들어오면 그 대안이
-# 맞지 않아 `/`로 떨어지므로 `/assets/%2e%2e/p/36.4,127.1` 같은 것도 새지 않는다.
+# ## 자산 파일명도 남기지 않는다 (2026-09-13, Astra delta D1)
+#
+# 예전에는 `/assets/`만 예외로 두고 파일명을 `[A-Za-z0-9._-]{1,128}`로 한정해 **그대로**
+# 남겼다. "빌드가 붙인 내용 해시라 민감값이 아니다"라고 봤기 때문이다. 그런데 그 경로로
+# 무엇을 요청할지는 **서버가 아니라 요청자가 정한다.** 파일이 없으면 404일 뿐 로그에는
+# 남는다. 실제 caddy:2.11.4-alpine으로 재현한 줄:
+#
+#   /assets/36.47130-127.14020.js   -> "uri": "/assets/36.47130-127.14020.js"
+#   /assets/AUDIT_PRIVATE_QUERY.js  -> "uri": "/assets/AUDIT_PRIVATE_QUERY.js"
+#   /assets/36.47130,127.14020      -> "uri": "/assets/36.47130"   (쉼표에서 끊겨 절반이 남았다)
+#   /assets/sub/36.47130-...        -> "uri": "/assets/sub"
+#
+# 글자 집합으로 "파일명처럼 생겼는지"를 보는 것은 **모양 검사이지 출처 검사가 아니다.**
+# 좌표도 검색어도 그 글자 집합 안에 들어간다. 그래서 아는 경로 템플릿만 남긴다는 이 절의
+# 원칙을 자산에도 똑같이 적용해 **`/assets` 한 덩어리**로 줄인다. 파일명은 남지 않는다.
+# 어떤 자산이 얼마나 나갔는지는 로그가 아니라 배포본(`web_release.sh`)이 말한다.
 #
 # **백슬래시를 쓰지 않는다.** Caddyfile이 백슬래시를 그대로 넘겨 `\.`이 엉뚱하게
 # 해석된 적이 있어(아래 예전 주석) `[.]`으로 적는다. `(?s)`는 `.`이 줄바꿈도 먹게 한다.
 (redacted_fields) {
 	fields {
-		request>uri regexp "(?s)^(/api/(?:analyze|route|search|health)|/assets/[A-Za-z0-9._-]{1,128}|/about|/index[.]html|/favicon[.]svg|/search|/c|/p|/)?.*$" "$1"
+		request>uri regexp "(?s)^(/api/(?:analyze|route|search|health)|/assets|/about|/index[.]html|/favicon[.]svg|/search|/c|/p|/)?.*$" "$1"
 		request>headers delete
 		request>client_ip delete
 		request>remote_port delete
