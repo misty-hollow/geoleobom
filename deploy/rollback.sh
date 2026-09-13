@@ -11,7 +11,25 @@
 # 셋은 **서로 다른 산출물**이라 따로 되돌린다. 웹만 깨졌는데 API 컨테이너까지 재생성할
 # 이유가 없고, 반대로 API를 되돌릴 때 화면까지 함께 움직이면 무엇을 되돌렸는지 말할 수 없다.
 #
-# 되돌린 뒤 반드시 deploy/smoke.py로 실제 응답을 확인한다. 이 스크립트는 확인하지 않는다.
+# 되돌린 뒤 반드시 스모크로 실제 응답을 확인한다. 이 스크립트는 확인하지 않는다.
+#
+# ## 검사도 함께 되돌린다 (2026-09-13, Astra delta D3)
+#
+# 예전에는 되돌린 뒤 **작업 트리의** `deploy/smoke.py`를 돌리라고 안내했다. 그런데 그
+# 스모크는 **지금 계약**을 본다. 되돌리는 산출물이 그보다 이전이면 짝이 맞지 않는다.
+#
+#   base 9212bcf의 API: `/api/route` -> 501 (그때는 범위 밖이었다)
+#   base 9212bcf의 스모크: `/api/route`를 부르지 않는다
+#   지금 스모크: `/route`의 출발지가 분석의 snapped와 같은지 **반드시** 본다
+#
+# 그래서 **정상 롤백인데 스모크가 실패**했다. 거꾸로 "501이면 건너뛴다"로 풀면 더
+# 나쁘다 — 현재 배포본에서 /route가 501이면 그것은 진짜 결함인데 통과해 버린다.
+#
+# 고치는 자리는 검사 논리가 아니라 **어느 검사를 쓰는가**다. 이미 그 커밋의 `deploy/`를
+# 꺼내 설정을 되돌리고 있으므로, 같은 곳에서 나온 `smoke.py`를 쓰면 계약이 저절로 맞는다.
+#
+#   현재 배포  -> 작업 트리의 deploy/smoke.py   (deploy_api.sh가 그렇게 부른다)
+#   롤백      -> 되돌린 커밋의 deploy/smoke.py  (아래 RESTORED_SMOKE)
 # 데이터 롤백은 **삭제하지 않는다.** current 링크만 옮기므로 다시 앞으로 갈 수 있다.
 #
 # ## 이미지와 설정을 함께 되돌린다
@@ -97,11 +115,20 @@ READ
 		echo "   커밋 $PREV_SHA 가 로컬에 없다 (git fetch 했는가). 설정을 되돌리지 못한다." >&2
 		exit 1
 	else
-		STAGE_DIR="$(mktemp -d)"
-		trap 'rm -rf "$STAGE_DIR"' EXIT
-		git -C "$REPO_ROOT" archive "$PREV_SHA" deploy | tar -x -C "$STAGE_DIR"
-		scp -q "$STAGE_DIR/deploy/compose.yaml" "$STAGE_DIR/deploy/Caddyfile" "$HOST:$REMOTE_DIR/"
+		# 되돌린 커밋의 `deploy/`를 **통째로** 꺼내 남긴다. 설정만이 아니라 **그 배포본의
+		# 스모크**가 필요하기 때문이다(아래 "검사도 함께 되돌린다").
+		RESTORED_DIR="$REPO_ROOT/.rollback-release/$PREV_SHA"
+		rm -rf "$RESTORED_DIR"
+		mkdir -p "$RESTORED_DIR"
+		git -C "$REPO_ROOT" archive "$PREV_SHA" deploy | tar -x -C "$RESTORED_DIR"
+		scp -q "$RESTORED_DIR/deploy/compose.yaml" "$RESTORED_DIR/deploy/Caddyfile" "$HOST:$REMOTE_DIR/"
 		echo "   커밋 $PREV_SHA 의 deploy/ 복원 (웹 배포물은 별도다 — rollback.sh web)"
+		if [[ -f "$RESTORED_DIR/deploy/smoke.py" ]]; then
+			RESTORED_SMOKE="$RESTORED_DIR/deploy/smoke.py"
+			echo "   그 커밋의 스모크: $RESTORED_SMOKE"
+		else
+			echo "   주의: 그 커밋에 deploy/smoke.py가 없다. 무엇으로 확인할지 사람이 정해라." >&2
+		fi
 	fi
 
 	echo "== 3. 이미지 되돌리고 기동"
@@ -306,4 +333,13 @@ esac
 
 echo
 echo "되돌렸다. 실제 응답을 확인하기 전에는 복구됐다고 하지 않는다:"
-echo "  python deploy/smoke.py --base-url https://geoleobom.kr"
+if [[ -n "${RESTORED_SMOKE:-}" ]]; then
+	echo "  python $RESTORED_SMOKE --base-url $BASE_URL"
+	echo
+	echo "  ^ **되돌린 커밋($PREV_SHA)의 스모크다.** 작업 트리의 deploy/smoke.py를 쓰지 마라."
+	echo "    지금 트리의 스모크는 **지금 계약**을 본다. 되돌린 API가 그 계약보다 이전이면"
+	echo "    (예: /route가 501이던 판) 정상 복구인데도 실패로 나온다."
+else
+	echo "  python $REPO_ROOT/deploy/smoke.py --base-url $BASE_URL"
+	echo "  (되돌린 커밋의 스모크를 꺼내지 못했다 — 위 경고를 보고 무엇으로 확인할지 정해라.)" >&2
+fi

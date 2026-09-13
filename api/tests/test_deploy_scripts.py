@@ -248,6 +248,27 @@ def test_code_rollback_restores_config_and_image_together(rollback: str):
     assert "caddy reload" in rollback, "설정을 되돌리고 Caddy를 다시 읽히지 않는다"
 
 
+def test_code_rollback_points_at_the_restored_release_smoke(rollback: str):
+    """되돌린 뒤 **그 배포본의 스모크**를 돌리라고 안내한다 (Astra delta D3).
+
+    작업 트리의 `deploy/smoke.py`는 **지금 계약**을 본다. 되돌린 API가 그보다 이전이면
+    (base 9212bcf의 `/api/route`는 501이다) 정상 복구인데도 실패로 나온다. 이미 그
+    커밋의 `deploy/`를 꺼내 설정을 되돌리고 있으므로, 같은 곳의 `smoke.py`를 쓰면
+    계약이 저절로 맞는다.
+
+    "501이면 건너뛴다"로 푸는 것은 금지다 — 현재 배포본에서 /route가 501이면 그것은
+    진짜 결함인데 통과해 버린다. 그래서 고치는 자리는 **어느 검사를 쓰는가**다.
+    """
+    # 꺼낸 deploy/를 지우지 않고 남긴다. mktemp + trap rm이면 스모크를 돌릴 수 없다.
+    assert "RESTORED_DIR=" in rollback, "되돌린 커밋의 deploy/를 남길 자리가 없다"
+    assert 'rm -rf "$STAGE_DIR"' not in rollback
+    assert 'RESTORED_SMOKE="$RESTORED_DIR/deploy/smoke.py"' in rollback
+    # 최종 안내가 **그 스모크**를 가리킨다.
+    assert "python $RESTORED_SMOKE --base-url" in rollback
+    # 작업 트리의 스모크를 그냥 돌리라고 하지 않는다.
+    assert 'echo "  python deploy/smoke.py --base-url https://geoleobom.kr"' not in rollback
+
+
 def test_code_rollback_reads_the_smoke_verified_recovery_point(rollback: str):
     assert ".env.last-good" in rollback
     # 이전 방식 파일로 되돌아가는 경로가 있다면 그것이 검증 기록이 아님을 말해야 한다.

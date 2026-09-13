@@ -421,6 +421,17 @@ def check_route_uses_the_same_snap(
             route = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         exc.read()
+        if exc.code == 501:
+            # **통과시키지 않는다.** 현재 배포본에서 /route가 501이면 그것은 진짜 결함이다.
+            # 다만 되돌린 옛 산출물에 이 스모크를 잘못 붙였을 때도 같은 모양이 나오므로,
+            # 어느 쪽인지 사람이 바로 알 수 있게 적어 준다 (Astra delta D3).
+            return [
+                (
+                    "/route가 501이다. 현재 배포본이라면 이것은 결함이다. "
+                    "되돌린 산출물을 확인하는 중이라면 **이 스모크가 그 산출물의 것이 "
+                    "아니다** — rollback.sh가 알려 준 그 커밋의 deploy/smoke.py로 확인해라."
+                )
+            ]
         return [f"/route가 HTTP {exc.code} (분석이 실은 fid {fid}인데 경로가 없다)"]
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return [f"/route 요청 실패 {exc}"]
