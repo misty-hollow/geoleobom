@@ -69,7 +69,23 @@
   display: flex;
   /* 아이콘 버튼 44 두 개. 시트 우측 패딩과 아이콘 끝을 맞추기 위해 -12 보정. */
   margin-right: -12px;
-  margin-top: -6px;
+}
+
+/*
+ * 아이콘을 제목 줄에 맞추는 -6px 보정은 **버튼 상자가 아니라 버튼 안에서** 한다.
+ *
+ * 예전에는 `.headerActions`에 `margin-top: -6px`을 줬다. 그러면 44px 버튼이 스크롤 상자
+ * (시트 `.content`·패널 `.panelBody`) 위로 삐져나가고, 그 상자는 자기 padding box에서
+ * 자르므로 포커스 링 윗변이 통째로 사라졌다(Fable delta QA 2026-09-13: 담기·공유 5px 잘림).
+ *
+ * 아이콘이 보이는 자리는 한 픽셀도 바뀌지 않는다. 예전: 헤더 위 여백 + (-6) + 22(44px 버튼
+ * 가운데). 지금: 헤더 위 여백 + 6 + 10(20px 아이콘의 절반) — 둘 다 헤더 위 여백 + 16이다.
+ * 움직인 것은 44px 탭 상자뿐이고, 그것이 상자 안으로 들어오면서 링이 산다. 같은 6px이라
+ * 토큰이 아니라 위 보정과 짝이 되는 값으로 적는다.
+ */
+.headerActions .headerAction {
+  align-items: flex-start;
+  padding-top: 6px;
 }
 
 .saved {
@@ -293,13 +309,26 @@
   grid-template-rows: 1fr;
 }
 
+/*
+ * `overflow: hidden`은 0fr ↔ 1fr 접힘에 필요하다. 그런데 그 상자가 **포커스 링도 자른다** —
+ * top3 항목은 오른쪽 끝이 상자 끝과 1px 차이라 바깥 링(4px)의 오른변이 3px 잘렸다
+ * (Fable delta QA 2026-09-13, 390·1280 모두).
+ *
+ * 음수 margin과 같은 크기의 padding을 함께 주면 **자르는 상자만 좌우로 8px씩 넓어지고
+ * 안의 내용은 한 픽셀도 움직이지 않는다.** 항목 글자·숫자 자리는 그대로 두고 링만 산다.
+ * 세로로 같은 수를 쓰지 않는 이유: 접힌(0fr) 상태에서 padding이 상자 높이의 하한이 되어
+ * 접힘이 8px에서 멈춘다. 첫 항목의 윗변은 `.top3List`의 위 여백으로 푼다.
+ */
 .top3Inner {
   overflow: hidden;
   min-height: 0;
+  margin: 0 calc(-1 * var(--s-2));
+  padding: 0 var(--s-2);
 }
 
+/* 위 4px: 첫 항목의 포커스 링 윗변이 `.top3Inner`에 잘리지 않게 한다(위 주석). */
 .top3List {
-  padding: 0 0 var(--s-2) 32px;
+  padding: var(--s-1) 0 var(--s-2) 32px;
 }
 
 .top3Note {

@@ -142,6 +142,8 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* 포커스 스크롤이 요소를 가장자리에 붙여 링이 잘리지 않게(Sheet.module.css의 `.content`와 같은 이유). */
+  scroll-padding: var(--s-2);
 }
 
 .panelBar {

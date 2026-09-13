@@ -113,6 +113,25 @@ dialog::backdrop {
   outline-offset: 2px;
 }
 
+/*
+ * 링을 **요소 안쪽에** 그리는 예외.
+ *
+ * 잘린 링의 원인은 두께가 아니라 자리다. 스크롤·접힘 상자는 자기 padding box에서 자르는데,
+ * 결과 헤더의 아이콘 버튼(담기·공유)은 그 상자의 **맨 윗줄**에 있다. 위로 남은 것은
+ * `.header`의 위 여백 4px뿐이고 ≤359에서는 0이다. 바깥 링은 offset 2 + 두께 2 = 4px를 더
+ * 쓰므로 어느 쪽이든 윗변이 남지 않는다(Fable delta QA 2026-09-13: 담기·공유 윗변 5px 잘림).
+ *
+ * 배치를 옮기는 대신 링을 안으로 넣는다. 두께 2px과 색(--focus)은 그대로라 대비도 그대로이고
+ * (흰 배경 6.8:1), 네 변이 모두 요소 **안**에 있어 어떤 상자에서도 잘리지 않는다. 44px 버튼 안의
+ * 20px 아이콘과는 옆으로 8px, 위아래로 2px 떨어져 겹치지 않는다(Result.module.css의 `.headerAction`).
+ *
+ * 글자가 요소 가장자리까지 차는 컨트롤(top3 항목)에는 쓰지 않는다. 거기서는 링이 글자에
+ * 닿으므로 상자 쪽에 여유를 만든다(Result.module.css의 `.top3Inner`·`.top3List`).
+ */
+.focus-inset:focus-visible {
+  outline-offset: -2px;
+}
+
 /* 숫자는 항상 표형 */
 .num,
 [data-num] {

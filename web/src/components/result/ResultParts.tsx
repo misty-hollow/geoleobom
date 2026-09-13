@@ -84,17 +84,27 @@ export function ResultHeader({ label, secondary, candidateIndex, saved, onSave, 
         </div>
         <p className={styles.secondary}>{secondary}</p>
       </div>
+      {/*
+        두 버튼은 스크롤 상자의 **맨 윗줄**에 있다. 위로 4px밖에 없어(≤359에서는 0) 바깥
+        포커스 링은 잘린다 — 그래서 링을 안쪽에 그린다(`focus-inset`, base.css).
+        `headerAction`은 44px 탭 상자를 상자 안으로 들여놓는다(Result.module.css).
+      */}
       <div className={styles.headerActions}>
         <Button
           variant="icon"
           aria-label={saved ? ko.header.saved : ko.header.save}
           pressed={saved}
           onClick={onSave}
-          className={saved ? styles.saved : undefined}
+          className={[styles.headerAction, 'focus-inset', saved ? styles.saved : ''].filter(Boolean).join(' ')}
         >
           <Icon name={saved ? 'starFilled' : 'star'} />
         </Button>
-        <Button variant="icon" aria-label={ko.header.share} onClick={onShare}>
+        <Button
+          variant="icon"
+          className={`${styles.headerAction} focus-inset`}
+          aria-label={ko.header.share}
+          onClick={onShare}
+        >
           <Icon name="share" />
         </Button>
       </div>

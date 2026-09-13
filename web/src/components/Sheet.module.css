@@ -80,6 +80,12 @@
   min-height: 0;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  /*
+   * 포커스가 옮겨 갈 때 브라우저는 **요소 상자**를 상자 가장자리에 딱 붙여 스크롤한다.
+   * 그러면 밖으로 4px 나가는 포커스 링이 잘린다(320×568 half에서 top3 셋째 항목 아랫변
+   * 4px, Fable delta QA 후속 측정 2026-09-13). 링이 들어갈 만큼만 여백을 둔다.
+   */
+  scroll-padding: var(--s-2);
 }
 
 @media (min-width: 768px) {
