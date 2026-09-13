@@ -1,6 +1,6 @@
 # 현재 상태 (STATUS.md)
 
-갱신: 2026-09-13 (PR #18 Astra 최종 delta D1~D4 remediation). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
+갱신: 2026-09-13 (Week 3 배포 시도 중단·복구, web release 지문 이식성·무결성 수정). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
 
 **이 파일은 현재 상태와 역사 기록을 함께 담는다.** 아래 "지금 동작하는 것"과 "현재
 작업과 다음 행동"이 현재이고, 날짜가 붙은 절(`## … (2026-09-12, …)` 등)은 **그때의
@@ -21,7 +21,28 @@
 
 ## 현재 작업과 다음 행동
 
-- **현재 작업: PR #18의 Astra 최종 delta D1~D4 remediation (2026-09-13, Opus 5).** `deploy/**`·`api/tests/**`·문서만 바뀌었고 **frontend(`web/**`)는 손대지 않았다.**
+- **현재 작업: web 릴리스 지문의 OS 의존성 수정 (2026-09-13, Opus 5). 브랜치 `fix/web-release-digest-portable`, base `3ed6f924`.**
+  - **Week 3 운영 배포를 시도했다가 web 단계에서 중단하고 되돌렸다.** PR #18은 `3ed6f924`로 병합됐고 Astra 최종 verdict는 MERGE였다. 배포 절차 자체의 결함이지 제품 코드 결함이 아니다.
+    - API/Caddy 전환(`--skip-smoke`)은 성공했다 — health 200, running digest `sha256:a3bc6d7b…`, Caddy reload 성공, `.env.last-good` 미갱신(설계대로).
+    - **web 배포가 `install_release`의 지문 대조에서 멈췄다.** 같은 `web/dist`인데 Windows가 `8e908dab…`, 리눅스 서버가 `ab34650a…`를 냈다. `current` 링크는 만들어지지 않았고 부분 배포물도 남지 않았다.
+    - 원인은 전송 손상이 아니라 **`release_digest`가 `sha256sum`의 사람이 읽는 출력을 다시 해시한 것**이다. 그 서식이 OS마다 다르다(Git Bash `<hash> *경로`, Linux `<hash>  경로`). Windows 출력의 `' *'`를 `'  '`로 바꿔 해시하면 리눅스 값과 **정확히 일치**했다 — 파일별 내용 해시는 같았다.
+    - 그 상태로 두면 `/`가 404였으므로(새 Caddyfile이 아직 없는 웹 루트를 본다) **`rollback.sh code`로 직전 정상 지점(`52d5bd7`)으로 되돌렸다.** 되돌린 배포본의 자기 스모크로 5좌표 전부 통과, `/` 200·`/api/health` 200 확인. D3 수정이 실제 운영에서 작동해 작업 트리가 아닌 **복구 대상 배포본의 스모크**를 가리켰다.
+  - **고친 것:** 지문이 **상대 경로와 그 파일 내용의 SHA-256, 그 둘만** 담는다. 경로는 NUL로 감싸 직접 스트림에 넣는다. 표시 서식·바이너리 표시(`*`)·OS별 공백·로캘은 지문에 들어가지 않는다. 경로가 남으므로 이름 변경도 여전히 잡는다.
+  - **실제 교차 플랫폼 증거:** 같은 `web/dist`로 Windows Git Bash와 리눅스 컨테이너가 모두 `3904cec7…`. 수정 전에는 `8e908dab…` / `ab34650a…`로 갈렸다.
+  - **검사 구조도 고쳤다.** 심볼릭 링크 probe가 파일 맨 앞에 있어 **Windows에서는 아무것도 돌기 전에 `exit 2`** 였다 — 지문 검사는 링크가 필요 없는데도 같이 건너뛰었고, 그래서 Linux↔Linux만 보던 CI가 이 결함을 놓쳤다. 이제 지문 절은 어디서나 돌고 링크 절만 POSIX 링크가 있는 곳에서 돈다(Windows 12건, Linux 35건). `sha256sum`을 PATH에서 가로채 두 서식을 강제하는 회귀도 넣었다 — **옛 알고리즘에서는 리눅스에서도 2건 실패**한다.
+  - 배포 경로가 이 라이브러리를 **따옴표 없는 heredoc**으로 서버에 보내므로, 실어 보낸 뒤에도 지문이 같은지 보는 검사도 함께 넣었다.
+  - **운영은 `52d5bd7` / `2026Q3-cc-03`으로 유지한다.** 이 PR이 병합된 뒤 **그 새 main SHA로 Week 3 배포를 처음부터 다시 시작한다.** `3ed6f924`를 임시 패치해 재배포하지 않는다.
+  - **Astra 독립 검토(FIX THEN MERGE) F1·F2를 이 PR 안에서 닫았다 (2026-09-13).**
+    - **F1 (merge-blocking).** `printf ... "$(sha256sum ...)"`의 안쪽 실패가 바깥 `printf`의 성공에 가려졌다. 해시가 실패한 트리가 exit 0 + 64자 지문을 냈고, **그 파일의 바이트만 다른 두 트리가 같은 지문**을 가졌다(둘 다 `경로 NUL NUL`). 재현했더니 `install_release`가 `reused`라고 답했다 — 배포는 성공했다고 말하고, 서버는 옛 바이트를 들고 있고, 방금 올린 바이트는 지워졌다.
+    - 이제 파이프라인을 쓰지 않는다(파이프라인 안의 `while`은 종료 상태가 버려진다). 목록을 임시 파일에 적고 단계마다 상태를 본다. 추출한 해시가 `^[0-9a-f]{64}$`인지도 검증한다 — exit 0인데 출력이 비었거나 짧거나 이스케이프가 붙은 경우도 실패다. `set -e`/`pipefail`에 기대지 않는다(이 파일은 남의 셸에서 source된다).
+    - `install_release`도 **지문을 계산하지 못한 것을 지문이 다른 것보다 나쁘게** 다룬다. reused로 넘기지 않고, 있던 릴리스도 스테이징도 지우지 않고 멈춘다 — 무엇이 올라왔는지 모르는 상태에서 증거를 지우지 않는다.
+    - **F2.** `sha256sum -- "$file" | cut -c1-64`은 이름을 출력 파싱에 참여시킨다. 이름에 개행이 있으면 GNU는 줄 앞에 `\`를 붙여 해시가 63자만 남고, BusyBox는 출력이 두 줄이 되어 이름 조각이 레코드에 섞인다. **같은 트리가 BusyBox `bf30d267…`, GNU `001196…`으로 갈렸다.** 이제 파일 **내용만 stdin으로** 넣어 이름이 출력에 등장하지 않는다. 두 구현 모두 `b8269dbc…`로 일치한다.
+    - **정규 스트림 서식은 바꾸지 않았다.** 배포를 멈췄던 그 `web/dist`가 Windows·BusyBox·GNU 세 곳에서 그대로 `3904cec7…`다.
+    - 회귀: 해시 실패 주입(exit 73), malformed 출력 네 가지, install_release의 두 실패 지점, 링크 배치에서 current·previous 불변, 개행·공백·선행 대시 이름, heredoc 전송 뒤의 실패 전파, 그리고 **독립 Python canonical 계산과의 대조**. 새 회귀는 수정 전 코드에서 **Windows 13건·BusyBox 14건·GNU+python 15건** 실패한다.
+    - 결과: Windows 36건 실패 0(링크·개행 Python 대조 SKIP), BusyBox 63건 실패 0, GNU 63건 실패 0, GNU+python 65건 실패 0.
+  - 이 PR은 risk B다. Draft로 두고 독립 기술 검토 뒤 검토된 HEAD만 squash merge한다.
+
+- **직전 작업: PR #18의 Astra 최종 delta D1~D4 remediation (2026-09-13, Opus 5).** `deploy/**`·`api/tests/**`·문서만 바뀌었고 **frontend(`web/**`)는 손대지 않았다.**
   - Astra 최종 delta review가 HEAD `f27584c`에 대해 다시 **FIX THEN MERGE**로 판정했다. merge-blocking 3건(D1~D3)과 비차단 문서 정합성(D4)을 닫았다.
   - **D1 — Caddy 접근 로그에 `/assets/` 뒤 사용자 문자열이 남았다.** 허용 목록이 자산만 파일명 글자(`[A-Za-z0-9._-]{1,128}`)로 예외를 뒀는데, **그 경로로 무엇을 요청할지는 요청자가 정한다.** 실제 caddy:2.11.4-alpine 재현: `/assets/36.47130-127.14020.js`와 `/assets/AUDIT_PRIVATE_QUERY.js`가 그대로, `/assets/36.47130,127.14020`은 쉼표에서 끊겨 `/assets/36.47130`으로 남았다. 자산도 **`/assets` 한 덩어리**로 줄인다. 파일명은 남지 않는다.
   - **D2 — `measure_flow.py`가 그릴 수 없는 geometry를 성공으로 셌다.** `len(coordinates)`만 봐서 `LineString + [null, null]`과 `Polygon + 좌표 2개`가 `rounds_complete=2`·`exit 0`이었다. `geometry.type`·좌표 쌍·유한한 수까지 본다(계약 밖 추측 검증은 넣지 않았다).
