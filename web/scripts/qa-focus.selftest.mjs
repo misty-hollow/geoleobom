@@ -11,8 +11,11 @@
  *     → 같은 색 2px. 둘 다 DESIGN.md 10절·18절이 정한 값이다.
  *   - 대비: `--focus: #1f4fd0`, 흰 배경. 상대휘도 L = 0.1044이므로
  *     (1.0 + 0.05) / (0.1044 + 0.05) = 6.80:1 — WCAG 1.4.11의 3:1을 넘는다.
+ *   - 잘림: `outline-offset: 2px` + 두께 2px이므로 요소 밖으로 4px 나간다. 자르는 상자가
+ *     그보다 가까우면 그 변은 보이지 않는다. 사각형 값은 Fable이 실제 브라우저에서 읽은
+ *     것이다(delta QA 2026-09-13, 390×844·1280×800).
  *
- * 반례는 Astra가 지적한 false-green들이다. 하나라도 통과하면 이 검사가 실패한다.
+ * 반례는 Astra가 지적한 false-green들과 Fable이 본 잘림이다. 하나라도 통과하면 이 검사가 실패한다.
  *
  * 실행: node scripts/qa-focus.selftest.mjs  (npm run check:qa)
  */
@@ -26,6 +29,7 @@ import {
   luminance,
   parseColor,
   parseShadows,
+  ringClipping,
 } from './qa-focus.mjs'
 
 const ACCENT = 'rgb(31, 79, 208)'
@@ -36,6 +40,7 @@ function measured(over = {}) {
   return {
     outlineStyle: 'none',
     outlineWidth: '0px',
+    outlineOffset: '2px',
     outlineColor: 'rgb(0, 0, 0)',
     boxShadow: 'none',
     borderColor: 'rgba(0, 0, 0, 0)',
@@ -151,9 +156,59 @@ expect('반례 거부: 반투명 링은 배경에 합성한 값으로 본다', (
   assert.ok(ring.contrast < FOCUS_MIN_CONTRAST, `대비 ${ring.contrast}가 통과했다`)
 })
 
+// --- 잘림 판정 (Fable delta QA 2026-09-13) --------------------------------
+//
+// 기대값은 Fable이 실제 브라우저에서 읽은 사각형과 base.css의 `outline: 2px / offset 2px`에서
+// 온다. 두께·대비만 보는 판정은 이 세 경우를 **전부 통과시킨다** — 그것이 이 검사의 이유다.
+
+expect('바깥 링의 바깥 여유는 offset + 두께 = 4px다', () => {
+  assert.equal(focusIndicator(BUTTON).outset, 4)
+  // 안쪽 링(base.css의 `.focus-inset`)은 요소 밖으로 나가지 않는다.
+  assert.equal(focusIndicator({ ...BUTTON, outlineOffset: '-2px' }).outset, 0)
+})
+
+expect('잘리지 않은 링은 통과한다', () => {
+  const el = { x: 49, y: 626, r: 373, b: 672 }
+  const clip = { x: 8, y: 620, r: 382, b: 781 }
+  assert.equal(ringClipping(el, clip, 4).clipped, false)
+})
+
+expect('잘림 반례: 담기·공유 윗변 (스크롤 상자 위로 1px 넘어간 44px 버튼)', () => {
+  // Fable 측정 390×844: 버튼 428~472, 스크롤 상자 위 429. 바깥 링은 424까지 간다.
+  const result = ringClipping({ x: 298, y: 428, r: 342, b: 472 }, { x: 0, y: 429, r: 390, b: 844 }, 4)
+  assert.equal(result.clipped, true)
+  assert.deepEqual(result.cutSides, ['top'])
+  assert.equal(result.cut.top, 5)
+})
+
+expect('잘림 반례: top3 항목 오른변 (접힘 상자 overflow: hidden)', () => {
+  // Fable 측정: 항목 오른끝 373, top3Inner 오른끝 374. 링은 377까지 간다.
+  const result = ringClipping({ x: 49, y: 630, r: 373, b: 676 }, { x: 16, y: 625, r: 374, b: 777 }, 4)
+  assert.equal(result.clipped, true)
+  assert.deepEqual(result.cutSides, ['right'])
+  assert.equal(result.cut.right, 3)
+})
+
+expect('잘림 반례: 접힘 상자 안 첫 항목의 윗변 (좌우는 여유가 있어도 위가 잘린다)', () => {
+  const result = ringClipping({ x: 49, y: 626, r: 373, b: 672 }, { x: 8, y: 625, r: 382, b: 777 }, 4)
+  assert.equal(result.clipped, true)
+  assert.deepEqual(result.cutSides, ['top'])
+})
+
+expect('상자 가장자리에 딱 붙은 링은 잘린 것이 아니다', () => {
+  // 안쪽 링(outset 0)이고 요소 윗변이 상자 윗변과 같다 — 스트로크가 상자 안에 온전히 있다.
+  assert.equal(ringClipping({ x: 232, y: 272, r: 276, b: 316 }, { x: 0, y: 272, r: 320, b: 568 }, 0).clipped, false)
+  // 0.4px 차이는 소수점이지 잘림이 아니다.
+  assert.equal(ringClipping({ x: 232, y: 271.6, r: 276, b: 316 }, { x: 0, y: 272, r: 320, b: 568 }, 0).clipped, false)
+})
+
+expect('잘림 판정이 눈멀지 않았다: 1px 잘림은 잡는다', () => {
+  assert.equal(ringClipping({ x: 10, y: 10, r: 100, b: 50 }, { x: 0, y: 11, r: 200, b: 200 }, 0).clipped, true)
+})
+
 console.log(
   failures === 0
-    ? `\n포커스 판정 자체 검사 통과 (기준: ${FOCUS_MIN_PX}px 이상, 대비 ${FOCUS_MIN_CONTRAST}:1 이상)`
+    ? `\n포커스 판정 자체 검사 통과 (기준: ${FOCUS_MIN_PX}px 이상, 대비 ${FOCUS_MIN_CONTRAST}:1 이상, 네 변 모두 보임)`
     : `\n실패 ${failures}건`,
 )
 process.exit(failures === 0 ? 0 : 1)

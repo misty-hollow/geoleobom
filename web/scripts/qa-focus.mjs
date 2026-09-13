@@ -18,6 +18,14 @@
 export const FOCUS_MIN_CONTRAST = 3
 /** DESIGN.md 10절·18절이 정한 포커스 링 두께. */
 export const FOCUS_MIN_PX = 2
+/**
+ * 잘림 판정의 허용 오차(px).
+ *
+ * 상자 가장자리에 딱 붙은 링은 정상이다(요소가 상자 첫 줄에 있으면 그렇게 된다). 브라우저가
+ * 돌려주는 사각형은 소수점이 있어 0으로 재면 0.2px 차이에 흔들린다. 눈에 보이는 잘림은
+ * 1px 단위이므로 그 절반을 경계로 둔다.
+ */
+export const FOCUS_CLIP_TOLERANCE = 0.5
 
 export function parseColor(text) {
   const m = /rgba?\(([^)]+)\)/.exec(text ?? '')
@@ -128,5 +136,56 @@ export function focusIndicator(measured) {
   }
 
   const background = parseColor(measured.background)
-  return { px, color, contrast: contrastRatio(over(color, background), background), parts }
+  return {
+    px,
+    color,
+    contrast: contrastRatio(over(color, background), background),
+    parts,
+    outset: indicatorOutset(measured, hasOutline, ringShadow),
+  }
+}
+
+// --- 잘림 (Fable delta QA 2026-09-13) ---------------------------------------
+//
+// 두께와 대비가 맞아도 **상자가 자르면 보이지 않는다.** Fable이 실제 키보드 탐색에서 본 것이
+// 그것이다: 링은 2px·6.8:1인데 담기·공유의 윗변이 스크롤 상자에, top3 항목의 오른변이 접힘
+// 상자(`overflow: hidden`)에 잘려 있었다. 색·두께만 재는 검사는 이것을 통과시킨다.
+
+/**
+ * 표시가 요소 상자 **밖으로** 얼마나 나가는지(px).
+ *
+ * `outline`은 `outline-offset`만큼 떨어진 자리부터 `outline-width`만큼 그려지므로 둘의 합이다.
+ * offset이 음수면 합도 작아지고, 0 이하면 표시가 요소 안에 있다는 뜻이라 어떤 상자도 자르지
+ * 못한다. 링 그림자는 spread + blur만큼 번져 나간다(테두리는 요소 안쪽이라 0).
+ */
+function indicatorOutset(measured, hasOutline, ringShadow) {
+  if (hasOutline) {
+    const width = parseFloat(measured.outlineWidth) || 0
+    const offset = parseFloat(measured.outlineOffset) || 0
+    return width + offset
+  }
+  if (ringShadow !== null) return ringShadow.spread + ringShadow.blur
+  return 0
+}
+
+/**
+ * 링이 **네 변 모두** 잘리지 않는지 본다.
+ *
+ * `el`은 포커스된 요소의 사각형, `clip`은 그 요소를 자르는 조상들(overflow가 visible이 아닌
+ * 것)과 뷰포트의 교집합이다. 둘 다 브라우저에서 읽어 온 값이고, 여기서는 계산만 한다.
+ *
+ * `outset`이 음수면 링은 요소 안쪽이다 — 요소 자체가 상자를 넘어가 있을 때만 잘린다. 그래서
+ * 음수도 그대로 더한다(빼지 않는다).
+ */
+export function ringClipping(el, clip, outset) {
+  const ring = { x: el.x - outset, y: el.y - outset, r: el.r + outset, b: el.b + outset }
+  const over = (value) => (value > FOCUS_CLIP_TOLERANCE ? Math.round(value * 10) / 10 : 0)
+  const cut = {
+    top: over(clip.y - ring.y),
+    left: over(clip.x - ring.x),
+    right: over(ring.r - clip.r),
+    bottom: over(ring.b - clip.b),
+  }
+  const sides = Object.entries(cut).filter(([, value]) => value > 0)
+  return { ring, cut, clipped: sides.length > 0, cutSides: sides.map(([side]) => side) }
 }

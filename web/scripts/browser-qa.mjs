@@ -16,6 +16,11 @@
  *     spread 0px도 문자열에는 색이 남아 예전 검사를 통과했다. 판정 논리는 `qa-focus.mjs`에
  *     있고 `qa-focus.selftest.mjs`가 CI에서 반례로 검사한다. 여기서도 링을 투명하게 만든
  *     **대조군**으로 판정이 살아 있는지 확인한다.
+ *   - **두께·대비가 맞아도 상자가 자르면 보이지 않는다** (Fable delta QA 2026-09-13: 담기·공유
+ *     윗변, top3 항목 오른변·첫 항목 윗변). 그래서 포커스 가능한 컨트롤을 하나씩 눌러 보며
+ *     링 사각형과 자르는 조상들의 교집합을 맞대 본다(`focusClipScan`). 링을 상자 밖으로
+ *     밀어내는 **대조군**으로 이 판정도 살아 있는지 확인한다. 화면에 한 픽셀도 없는 컨트롤
+ *     (접힌 top3)은 세지 않고, 접힘 아래에 걸친 컨트롤은 NOTE로 남긴다.
  *   비교표(강조·동률·sticky·가로 스크롤·좌표 한 줄·상태 셀 2줄) → reduced-motion. 각 단계 스크린샷을 남긴다.
  *   **자동 PASS는 시각 QA의 끝이 아니다** — 스크린샷을 DESIGN.md·Claude Design 레퍼런스와 사람이 대조한다.
  *
@@ -35,7 +40,7 @@
  * Engineering Authority(Opus)의 통합 검토 항목이다.
  */
 import { chromium } from 'playwright-core'
-import { FOCUS_MIN_CONTRAST, FOCUS_MIN_PX, focusIndicator } from './qa-focus.mjs'
+import { FOCUS_MIN_CONTRAST, FOCUS_MIN_PX, focusIndicator, ringClipping } from './qa-focus.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -75,6 +80,23 @@ function note(name, detail) {
 
 async function shot(page, name) {
   await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: false })
+}
+
+/**
+ * 대조군 스타일을 **넣고 반드시 뺀다**.
+ *
+ * 예전에는 `page.addStyleTag({ id, content })`로 넣고 `getElementById(id)`로 지웠다.
+ * `addStyleTag`는 `id`를 받지 않으므로 그 요소에는 id가 없었고 **대조군이 지워지지 않은 채
+ * 남았다** — 그 뒤에 재는 포커스 표시는 전부 투명한 링이었다. 대조군 자체가 뒤따르는
+ * 측정을 눈멀게 하는 셈이라, 돌려받은 핸들로 지운다.
+ */
+async function withStyle(page, css, fn) {
+  const handle = await page.addStyleTag({ content: css })
+  try {
+    return await fn()
+  } finally {
+    await handle.evaluate((node) => node.remove())
+  }
 }
 
 async function noHorizontalOverflow(page, label) {
@@ -134,18 +156,99 @@ const measureFocusRing = () => {
     }
   }
   const cs = getComputedStyle(host)
+  const box = host.getBoundingClientRect()
+  // 표시를 자르는 상자들의 교집합. overflow가 visible이 아닌 조상은 자기 padding box에서
+  // 자르고, 마지막으로 뷰포트가 자른다. 이 값이 있어야 "네 변이 보이는가"를 판정할 수 있다.
+  let clip = { x: 0, y: 0, r: window.innerWidth, b: window.innerHeight }
+  for (let node = host.parentElement; node !== null; node = node.parentElement) {
+    const style = getComputedStyle(node)
+    const cuts = (value) => value === 'hidden' || value === 'auto' || value === 'scroll' || value === 'clip'
+    if (!cuts(style.overflowX) && !cuts(style.overflowY)) continue
+    const rect = node.getBoundingClientRect()
+    clip = {
+      x: Math.max(clip.x, rect.left),
+      y: Math.max(clip.y, rect.top),
+      r: Math.min(clip.r, rect.right),
+      b: Math.min(clip.b, rect.bottom),
+    }
+  }
   return {
     tag: el.tagName,
     name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 24),
     host: host === el ? 'self' : host.className.toString().slice(0, 30),
     outlineStyle: cs.outlineStyle,
     outlineWidth: cs.outlineWidth,
+    outlineOffset: cs.outlineOffset,
     outlineColor: cs.outlineColor,
     boxShadow: cs.boxShadow,
     borderColor: cs.borderTopColor,
     borderWidth: cs.borderTopWidth,
     background: opaqueBackground(host.parentElement ?? host),
+    el: { x: box.left, y: box.top, r: box.right, b: box.bottom },
+    clip,
+    // 요소가 실제로 보이는가. 접힌 top3(0fr + overflow: hidden)의 항목은 여전히 탭 순회에
+    // 들어오지만 **화면에는 한 픽셀도 없다** — 거기서는 볼 링도 없다.
+    onScreen: Math.min(clip.r, box.right) - Math.max(clip.x, box.left) > 0 &&
+      Math.min(clip.b, box.bottom) - Math.max(clip.y, box.top) > 0,
+    // 잘린 변이 **화면 가장자리**인가. 접힘 아래로 내려간 콘텐츠는 시트를 올려 보는 것이라
+    // 상자가 가까워서 잘리는 것(Fable이 본 결함)과 구분한다.
+    atScreenEdge: {
+      top: clip.y <= 0.5,
+      left: clip.x <= 0.5,
+      right: clip.r >= window.innerWidth - 0.5,
+      bottom: clip.b >= window.innerHeight - 0.5,
+    },
   }
+}
+
+/**
+ * 결과 화면을 **키보드로** 한 바퀴 돌며 포커스 링의 네 변이 보이는지 잰다.
+ *
+ * top3를 먼저 펼친다 — Fable이 잘림을 본 항목들이 거기 있고, 접혀 있으면 순회에 들어오지도
+ * 않는다. 펼치는 것도 키보드로 한다(마우스를 쓰면 그 뒤 `:focus-visible`이 맞지 않는다).
+ */
+async function focusClipScan(page) {
+  // 이미 펼쳐져 있으면 다시 누르지 않는다 — 이 함수는 대조군 때문에 두 번 불린다.
+  const expanded = await page.evaluate(
+    () => document.querySelector('#top3-convenience')?.hasAttribute('hidden') === false,
+  )
+  if (!expanded) {
+    await page.focus('#row-convenience')
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('#top3-convenience:not([hidden])')
+    await page.waitForTimeout(400)
+  }
+  // 방금 키보드를 썼으므로 이 뒤의 `focus()`도 `:focus-visible`을 켠다. Tab 순회로 돌지
+  // 않는 이유: Tab은 **지금 포커스 자리에서 이어져** 시작점이 실행 순서에 딸려 간다.
+  // 여기서 보려는 것은 순서가 아니라 각 컨트롤의 링이므로 대상을 직접 고른다.
+  const targets = await page.$$(
+    'button:not([disabled]), a[href], input:not([disabled]), [tabindex="0"]',
+  )
+  const scan = []
+  for (const target of targets) {
+    if (!(await target.isVisible())) continue
+    await target.focus()
+    const measured = await page.evaluate(measureFocusRing)
+    if (measured === null || !measured.onScreen) continue
+    const inTop3 = await page.evaluate(() => document.activeElement?.closest('[id^="top3-"]') !== null)
+    const ring = focusIndicator(measured)
+    const clip = ringClipping(measured.el, measured.clip, ring.outset)
+    // 상자가 가까워서 잘린 변만 결함으로 센다. 화면 가장자리에서 잘린 것은 그 컨트롤이
+    // 접힘 아래에 걸쳐 있다는 뜻이고, 사용자는 시트를 올려서 본다 — 따로 적어 둔다.
+    const byBox = clip.cutSides.filter((side) => !measured.atScreenEdge[side])
+    const byScreen = clip.cutSides.filter((side) => measured.atScreenEdge[side])
+    scan.push({
+      name: measured.name || measured.tag,
+      inTop3,
+      drawn: ring.px >= FOCUS_MIN_PX && ring.contrast >= FOCUS_MIN_CONTRAST,
+      outline: `${measured.outlineWidth} ${measured.outlineStyle} off=${measured.outlineOffset} ${Math.round(ring.contrast * 10) / 10}:1`,
+      clipped: byBox.length > 0,
+      cut: clip.cut,
+      cutSides: byBox,
+      belowFold: byScreen,
+    })
+  }
+  return scan
 }
 
 /**
@@ -439,6 +542,13 @@ async function main() {
     const joined = names.join(' > ')
     check(`${vp.name}: Tab 순회에 담기·공유·행 포함`, /담기|담김/.test(joined) && /공유/.test(joined) && /편의점/.test(joined), joined.slice(0, 200))
     await shot(page, `${vp.name}-08-focus`)
+    // 18번 Tab이 마지막 컨트롤을 지나가면 포커스가 body로 빠진다. 그 상태에서 재면
+    // `null`이 나오고 판정이 "표시 없음"으로 **실패**한다 — 표시가 아니라 순회 길이가
+    // 다른 것이므로, 다시 Tab해서 컨트롤 위에서 잰다.
+    for (let i = 0; i < 4; i += 1) {
+      if ((await page.evaluate(() => document.activeElement !== document.body)) === true) break
+      await page.keyboard.press('Tab')
+    }
     // 포커스 표시는 **두께와 대비**로 판정한다. 색 문자열이 들어 있는지로 보면
     // `outline-color: transparent`나 spread 0px도 통과한다(Astra finding 10).
     const measured = await page.evaluate(measureFocusRing)
@@ -457,17 +567,66 @@ async function main() {
 
     // **대조군.** 링을 투명하게 만들고 같은 판정이 **거부하는지** 본다. 거부하지 못하면
     // 이 검사는 아무것도 지키지 않는 것이므로, CSS가 멀쩡해도 실패로 남긴다.
-    await page.addStyleTag({
-      id: 'qa-focus-decoy',
-      content: '*:focus-visible { outline-color: transparent !important; } .field:focus-within { border-color: transparent !important; box-shadow: none !important; }',
-    })
-    const blind = await page.evaluate(measureFocusRing)
+    const blind = await withStyle(
+      page,
+      '*:focus-visible { outline-color: transparent !important; } .field:focus-within { border-color: transparent !important; box-shadow: none !important; }',
+      () => page.evaluate(measureFocusRing),
+    )
     const blindRing = blind === null ? null : focusIndicator(blind)
-    await page.evaluate(() => document.getElementById('qa-focus-decoy')?.remove())
     check(
       `${vp.name}: focus 검사 대조군 — 보이지 않는 링은 거부한다`,
       blindRing !== null && (blindRing.px < FOCUS_MIN_PX || blindRing.contrast < FOCUS_MIN_CONTRAST),
       JSON.stringify({ px: blindRing?.px, contrast: blindRing && Math.round(blindRing.contrast * 100) / 100 }),
+    )
+
+    // --- 링의 **네 변이 모두 보이는가** (Fable delta QA 2026-09-13) ---
+    //
+    // 두께·대비만 보면 "그려졌지만 상자에 잘린 링"이 통과한다. Fable이 실제 키보드 탐색에서
+    // 본 것이 그것이다 — 담기·공유 윗변(스크롤 상자), top3 항목 오른변·첫 항목 윗변
+    // (`overflow: hidden` 접힘 상자). 그래서 여기서는 사각형으로 판정한다.
+    //
+    // **키보드로만 움직인다.** 마우스를 쓰면 이후 `:focus-visible`이 맞지 않아 링이 아예
+    // 그려지지 않고, 그 상태의 "잘림 없음"은 아무것도 뜻하지 않는다.
+    const clipScan = await focusClipScan(page)
+    const notDrawn = clipScan.filter((stop) => !stop.drawn)
+    const clipped = clipScan.filter((stop) => stop.clipped)
+    check(
+      `${vp.name}: 포커스 가능한 ${clipScan.length}곳 모두 링이 그려진다`,
+      clipScan.length >= 6 && notDrawn.length === 0,
+      notDrawn.map((s) => `${s.name}(${s.outline})`).join(' | ') || `${clipScan.length}곳`,
+    )
+    check(
+      `${vp.name}: 포커스 링 네 변이 모두 보인다 (담기·공유·top3 포함)`,
+      clipped.length === 0,
+      clipped.map((s) => `${s.name}: ${s.cutSides.join(',')} ${JSON.stringify(s.cut)}`).join(' | ') ||
+        `잘림 없음 (${clipScan.map((s) => s.name).join(' > ').slice(0, 160)})`,
+    )
+    check(
+      `${vp.name}: 순회에 담기·공유·top3 항목이 들어 있다`,
+      clipScan.some((s) => /담기|담김/.test(s.name)) &&
+        clipScan.some((s) => /공유/.test(s.name)) &&
+        clipScan.some((s) => s.inTop3),
+      clipScan.map((s) => s.name).join(' > ').slice(0, 200),
+    )
+    // 접힘 아래에 걸친 컨트롤은 링의 바깥 4px이 화면 밖이다. 시트를 올리면 보이므로
+    // 결함으로 세지 않지만, 조용히 넘기지도 않는다.
+    const belowFold = clipScan.filter((stop) => stop.belowFold.length > 0)
+    if (belowFold.length > 0) {
+      note(
+        `${vp.name}: 접힘 아래에 걸친 컨트롤의 링 바깥변`,
+        belowFold.map((s) => `${s.name}(${s.belowFold.join(',')})`).join(' | '),
+      )
+    }
+
+    // **대조군.** 링을 상자 밖으로 밀어내고 같은 판정이 **잡는지** 본다. 잡지 못하면
+    // 이 검사는 사각형을 보는 척만 하는 것이므로 CSS가 멀쩡해도 실패로 남긴다.
+    const decoyScan = await withStyle(page, '*:focus-visible { outline-offset: 24px !important; }', () =>
+      focusClipScan(page),
+    )
+    check(
+      `${vp.name}: 잘림 검사 대조군 — 상자 밖으로 나간 링은 거부한다`,
+      decoyScan.some((stop) => stop.clipped),
+      `${decoyScan.filter((s) => s.clipped).length}/${decoyScan.length}곳에서 잘림을 봤다`,
     )
 
     // --- 다이얼로그 ---

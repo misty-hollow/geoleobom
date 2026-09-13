@@ -7,9 +7,12 @@
  *   세로 중앙(±8px) → 핀 드래그(좌표 갱신, 지도 불변) → 사용자 팬 유지(다이얼로그·담기·스냅 변경 뒤 재중심 없음) →
  *   /p 직접 진입 3좌표 핀 배치 → 경로선·목적지 마커, canonical snap = route snapped_origin = geometry[0] →
  *   경로선이 시트·상단 검색바에 가리지 않음 → top3 교체 → peek/full 가시영역 → 콘솔 오류. 스크린샷을 남긴다.
- *   마지막으로 **같은 페이지에서 390 → 1280 → 390 왕복**(roundTrip): 배치가 시트 ↔ 패널로 바뀌어도 지도 요소가
+ *   마지막으로 **같은 페이지에서 390 → 1280 → 390 → 1280 왕복**(roundTrip): 배치가 시트 ↔ 패널로 바뀌어도 지도 요소가
  *   화면에 붙어 있고 타일·핀·경로선이 남는지. 뷰포트별 새 페이지 QA로는 이것이 잡히지 않는다 — 새 페이지는
  *   지도를 매번 처음부터 만들기 때문이다(Astra finding 2: resize 뒤 지도 DOM children 3 → 0).
+ *   같은 왕복에서 **전환으로 들어온 데스크톱의 핀·경로 자리를 1280 cold entry와 맞대 본다**
+ *   (Fable delta QA 2026-09-13: 전환 뒤 지도 내용이 위쪽 1/3에 몰렸다). 그리고 **모바일 peek·half·full에서
+ *   카카오 저작권이 시트에 가리지 않는지**를 `elementFromPoint`와 32×10 크기까지 확인한다(attributionVisible).
  *   **자동 PASS는 시각 QA의 끝이 아니다** — 스크린샷(타일 위 가독성·핀·선)을 사람이 본다.
  *
  * 준비
@@ -133,6 +136,57 @@ async function waitAnalysis(page) {
   await page.waitForTimeout(500)
 }
 
+/** 지도 위 상태를 한 번에 재는 값. 왕복 검사와 저작권 검사가 같은 자를 쓴다. */
+const probe = () => {
+  const app = document.querySelector('[role="application"]')
+  const host = document.querySelector('[data-kakao-map-host]')
+  const imgs = Array.from(app?.querySelectorAll('img') ?? [])
+  return {
+    // 훅이 소유한 요소가 화면에 붙어 있고, 그 안에 SDK가 그린 것이 있는가.
+    hostInDocument: host !== null && document.contains(host),
+    hostIsInsideSlot: host !== null && host.parentElement === app,
+    hostChildren: host ? host.childElementCount : 0,
+    tiles: imgs.filter((i) => i.src.includes('mts.daumcdn.net')).length,
+    pins: imgs.filter((i) => i.src.startsWith('data:image/svg+xml') && Math.round(i.getBoundingClientRect().width) === 32).length,
+    routePaths: Array.from(app?.querySelectorAll('svg path') ?? []).filter((el) => {
+      const r = el.getBoundingClientRect()
+      return r.width + r.height > 0
+    }).length,
+    aside: document.querySelector('aside') !== null,
+    appSize: app ? [Math.round(app.getBoundingClientRect().width), Math.round(app.getBoundingClientRect().height)] : null,
+    // 프레이밍: 핀 끝(마커 앵커)과 경로선 bbox가 지도 가시영역 어디에 놓였는가.
+    framing: (() => {
+      const r = (el) => { const b = el.getBoundingClientRect(); return { x: Math.round(b.left), y: Math.round(b.top), b: Math.round(b.bottom), r: Math.round(b.right) } }
+      const pin = imgs.find((i) => i.src.startsWith('data:image/svg+xml') && Math.round(i.getBoundingClientRect().width) === 32)
+      const paths = Array.from(app?.querySelectorAll('svg path') ?? []).filter((el) => { const b = el.getBoundingClientRect(); return b.width + b.height > 0 })
+      const boxes = paths.map((el) => el.getBoundingClientRect())
+      return {
+        pin: pin ? r(pin) : null,
+        route: boxes.length ? { top: Math.round(Math.min(...boxes.map((b) => b.top))), bottom: Math.round(Math.max(...boxes.map((b) => b.bottom))) } : null,
+      }
+    })(),
+    // 카카오 저작권·축척 막대: 시트가 덮지 않고 사용자에게 보이는가.
+    attribution: (() => {
+      const logo = host?.querySelector('a[href*="map.kakao.com"]') ?? null
+      if (logo === null) return null
+      const b = logo.getBoundingClientRect()
+      const sheet = document.querySelector('section[data-snap]')
+      const sheetTop = sheet ? Math.round(sheet.getBoundingClientRect().top) : null
+      const top = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2))
+      return {
+        y: Math.round(b.top),
+        bottom: Math.round(b.bottom),
+        size: [Math.round(b.width), Math.round(b.height)],
+        sheetTop,
+        snap: sheet?.dataset.snap ?? null,
+        // 우리 UI가 그 위를 덮고 있지 않은가. 시트가 덮으면 여기서 SECTION이 잡힌다.
+        onTop: Boolean(top && (top === logo || logo.contains(top))),
+        aboveSheet: sheetTop === null || Math.round(b.bottom) <= sheetTop,
+      }
+    })(),
+  }
+}
+
 /**
  * **같은 페이지에서** 960px 경계를 왕복한다 (Astra finding 2의 재현 절차).
  *
@@ -166,39 +220,22 @@ async function roundTrip(browser) {
     await page.waitForTimeout(1200)
   }
 
-  /** 왕복 중 매번 재는 값. 지도가 살아 있다면 전부 그대로여야 한다. */
-  const probe = () => {
-    const app = document.querySelector('[role="application"]')
-    const host = document.querySelector('[data-kakao-map-host]')
-    const imgs = Array.from(app?.querySelectorAll('img') ?? [])
-    return {
-      // 훅이 소유한 요소가 화면에 붙어 있고, 그 안에 SDK가 그린 것이 있는가.
-      hostInDocument: host !== null && document.contains(host),
-      hostIsInsideSlot: host !== null && host.parentElement === app,
-      hostChildren: host ? host.childElementCount : 0,
-      tiles: imgs.filter((i) => i.src.includes('mts.daumcdn.net')).length,
-      pins: imgs.filter((i) => i.src.startsWith('data:image/svg+xml') && Math.round(i.getBoundingClientRect().width) === 32).length,
-      routePaths: Array.from(app?.querySelectorAll('svg path') ?? []).filter((el) => {
-        const r = el.getBoundingClientRect()
-        return r.width + r.height > 0
-      }).length,
-      aside: document.querySelector('aside') !== null,
-      appSize: app ? [Math.round(app.getBoundingClientRect().width), Math.round(app.getBoundingClientRect().height)] : null,
-    }
-  }
 
   const steps = [
     ['모바일(첫 진입)', 390, 844, false],
     ['데스크톱(경계 넘음)', 1280, 800, true],
     ['모바일(되돌아옴)', 390, 844, false],
+    ['데스크톱(두 번째)', 1280, 800, true],
   ]
   let first = null
+  const desktopFraming = []
   for (const [label, width, height, wantAside] of steps) {
     await page.setViewportSize({ width, height })
     // 배치 전환 + 타일 재요청이 끝날 시간을 준다.
     await page.waitForTimeout(1500)
     const s = await page.evaluate(probe)
     if (first === null) first = s
+    if (wantAside) desktopFraming.push([label, s.framing])
     const name = `왕복 ${label}`
     check(`${name}: 배치가 실제로 바뀌었다(aside=${wantAside})`, s.aside === wantAside, JSON.stringify(s.appSize))
     check(`${name}: 지도 요소가 화면에 붙어 있다`, s.hostInDocument && s.hostIsInsideSlot, JSON.stringify({ inDoc: s.hostInDocument, inSlot: s.hostIsInsideSlot }))
@@ -207,10 +244,92 @@ async function roundTrip(browser) {
     check(`${name}: 카카오 타일이 그려져 있다`, s.tiles >= 4, `tiles=${s.tiles}`)
     check(`${name}: 핀이 하나 남아 있다`, s.pins === 1, `pins=${s.pins}`)
     check(`${name}: 경로선이 남아 있다`, s.routePaths > 0, `paths=${s.routePaths}`)
+    // 모바일 단계에서는 저작권이 시트 위에 보여야 한다(아래 attributionVisible과 같은 기준).
+    if (!wantAside && s.attribution !== null) {
+      check(
+        `${name}: 카카오 저작권이 시트 위에 보인다`,
+        s.attribution.aboveSheet && s.attribution.onTop,
+        JSON.stringify(s.attribution),
+      )
+    }
     await shot(page, `roundtrip-${width}-${label.replace(/[()]/g, '')}`)
+  }
+
+  /**
+   * **전환으로 들어온 데스크톱이 cold entry와 같은 곳을 본다** (Fable delta QA 2026-09-13).
+   *
+   * Fable 재현: 390 → 1280 전환 뒤 핀 y≈191·경로 bbox 107~277. 1280으로 바로 들어오면
+   * 핀 y≈400·경로 229~571 — 지도 내용이 데스크톱 위쪽 1/3에 몰렸다. 원인은 프레이밍이
+   * **이전 배치(모바일 시트)의 inset**을 쓴 것이다. 기준값은 같은 좌표·같은 경로로 1280에
+   * 바로 들어온 새 페이지에서 잰다.
+   */
+  const coldContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, locale: 'ko-KR' })
+  const coldPage = await coldContext.newPage()
+  await coldPage.goto(`${BASE}/p/${P_ENTRIES[0][1]}`, { waitUntil: 'domcontentloaded' })
+  await waitAnalysis(coldPage)
+  await waitTiles(coldPage)
+  const coldRow = await coldPage.$('#row-convenience')
+  if (coldRow !== null) {
+    await coldRow.click()
+    await coldPage.waitForTimeout(1500)
+  }
+  const cold = (await coldPage.evaluate(probe)).framing
+  await shot(coldPage, 'roundtrip-1280-cold-entry')
+  await coldContext.close()
+
+  // 타일·경로 렌더의 소수점 때문에 몇 px은 흔들린다. Fable이 본 차이는 200px 대였다.
+  const TOLERANCE = 12
+  const near = (a, b) => a !== null && b !== null && Math.abs(a - b) <= TOLERANCE
+  for (const [label, framing] of desktopFraming) {
+    check(
+      `왕복 ${label}: 핀이 cold entry와 같은 자리다`,
+      near(framing.pin?.b ?? null, cold.pin?.b ?? null),
+      JSON.stringify({ 전환: framing.pin, cold: cold.pin }),
+    )
+    check(
+      `왕복 ${label}: 경로 bbox가 cold entry와 같다`,
+      near(framing.route?.top ?? null, cold.route?.top ?? null) && near(framing.route?.bottom ?? null, cold.route?.bottom ?? null),
+      JSON.stringify({ 전환: framing.route, cold: cold.route }),
+    )
   }
   check('왕복: 콘솔·페이지 오류 없음', errors.length === 0, errors.slice(0, 4).join(' | '))
   await context.close()
+}
+
+/**
+ * 모바일 peek·half에서 **카카오 저작권이 시트에 가리지 않는다** (Fable delta QA 2026-09-13).
+ *
+ * Fable 재현(390×844): 저작권 y≈825, peek 시트 상단 y≈712, half 시트 상단 y≈405 —
+ * 둘 다 시트 아래였고 `elementFromPoint`도 시트를 집었다. 32×10 크기와 내용은 그대로 두고
+ * 자리만 가시영역 아래 끝으로 옮겼다(useKakaoMap의 `setAttributionInset`).
+ */
+async function attributionVisible(browser) {
+  for (const [width, height] of [[390, 844], [768, 1024]]) {
+    const context = await browser.newContext({ viewport: { width, height }, hasTouch: true, deviceScaleFactor: 1, locale: 'ko-KR' })
+    const page = await context.newPage()
+    await page.goto(`${BASE}/p/${P_ENTRIES[0][1]}`, { waitUntil: 'domcontentloaded' })
+    await waitAnalysis(page)
+    await waitTiles(page)
+    for (const snap of ['half', 'peek', 'full']) {
+      if (snap !== 'half') {
+        await page.focus('button[aria-label="시트 크기 조절"]')
+        await page.keyboard.press(snap === 'peek' ? 'ArrowDown' : 'ArrowUp')
+        await page.waitForTimeout(700)
+        if (snap === 'full') {
+          await page.keyboard.press('ArrowUp')
+          await page.waitForTimeout(700)
+        }
+      }
+      const a = (await page.evaluate(probe)).attribution
+      const label = `저작권 ${width} ${a?.snap ?? snap}`
+      check(`${label}: 시트 위에 있다`, a !== null && a.aboveSheet, JSON.stringify(a))
+      check(`${label}: 우리 UI가 덮지 않는다(elementFromPoint)`, a !== null && a.onTop, JSON.stringify(a))
+      // 카카오가 정한 크기는 우리가 바꾸지 않는다. 자리만 옮겼다는 증거다.
+      check(`${label}: 크기가 32×10 그대로다`, a !== null && a.size[0] === 32 && a.size[1] === 10, JSON.stringify(a?.size))
+      await shot(page, `attribution-${width}-${a?.snap ?? snap}`)
+    }
+    await context.close()
+  }
 }
 
 async function main() {
@@ -434,6 +553,7 @@ async function main() {
     await context.close()
   }
   await roundTrip(browser)
+  await attributionVisible(browser)
   await browser.close()
   fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   const fails = report.filter((r) => r.ok === false)
