@@ -47,6 +47,43 @@ export interface FakeMap extends FakeTarget {
  */
 export const FAKE_MAP_LAYERS = 3
 
+/**
+ * 실제 SDK가 컨테이너 안에 붙이는 **저작권·축척 막대**의 모양.
+ *
+ * 2026-09-13 실제 카카오 SDK에서 읽은 것을 그대로 옮겼다: 클래스 없는 `div`가 host의
+ * 직계 자식이고 인라인으로 `position:absolute; bottom:0; left:0`, 그 안에 축척 막대와
+ * 32×10 카카오 로고 링크(`a[href*="map.kakao.com"]`)가 있다.
+ *
+ * 가짜가 이걸 만들지 않으면 **"저작권이 시트에 가렸다"를 검사가 볼 수 없다** — 훅은
+ * 로고 링크를 기준으로 막대를 찾기 때문이다.
+ */
+function appendCopyrightBar(container: HTMLElement): void {
+  const document = container.ownerDocument
+  const bar = document.createElement('div')
+  bar.setAttribute('style', 'position: absolute; z-index: 1; margin: 0px 6px; height: 19px; left: 0px; bottom: 0px;')
+  const scale = document.createElement('div')
+  scale.textContent = '100m'
+  const link = document.createElement('a')
+  link.href = 'http://map.kakao.com/'
+  link.target = '_blank'
+  const logo = document.createElement('img')
+  logo.src = 'http://t1.daumcdn.net/mapjsapi/images/m_bi_b.png'
+  logo.alt = 'Kakao 맵으로 이동(새창열림)'
+  link.appendChild(logo)
+  bar.append(scale, link)
+  container.appendChild(bar)
+}
+
+/** 검사가 막대를 집는 방법. 훅이 쓰는 것과 같은 기준(로고 링크 → host 직계 자식)이다. */
+export function findFakeCopyrightBar(): HTMLElement | null {
+  const host = document.querySelector<HTMLElement>('[data-kakao-map-host]')
+  if (host === null) return null
+  const logo = host.querySelector<HTMLElement>('a[href*="map.kakao.com"]')
+  let node: HTMLElement | null = logo
+  while (node !== null && node.parentElement !== host) node = node.parentElement
+  return node
+}
+
 export interface FakeKakao {
   maps: Record<string, unknown> & {
     load: (cb: () => void) => void
@@ -175,6 +212,7 @@ export function createFakeKakao(): FakeKakao {
         layer.dataset.fakeKakaoLayer = String(index)
         container.appendChild(layer)
       }
+      appendCopyrightBar(container)
       calls.mapCreated += 1
       fake.lastMap = this
     }

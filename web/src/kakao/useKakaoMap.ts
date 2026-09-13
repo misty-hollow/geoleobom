@@ -104,6 +104,11 @@ export interface MapController {
    * 맞춘다. `topInset`은 상단바가 가린 높이(px, 데스크톱 패널 배치에서는 0).
    */
   setRoute: (route: MapRoute | null, bottomInset: number, topInset?: number) => void
+  /**
+   * 카카오가 그린 **저작권·축척 막대**를 시트가 가린 높이만큼 올린다(파일 아래 주석).
+   * `0`이면 SDK가 놓은 자리(지도 아래 끝)로 되돌린다.
+   */
+  setAttributionInset: (bottomInset: number) => void
   /** 공주대 신관캠퍼스 정문, level 4로 되돌린다(v2.4 3절 지원 지역 정책). */
   recenter: () => void
   zoomBy: (delta: 1 | -1) => void
@@ -208,6 +213,48 @@ function destinationImageSource(): string {
 }
 
 /**
+ * 카카오가 그린 **저작권·축척 막대**를 찾는다.
+ *
+ * ## 왜 SDK가 만든 요소를 우리가 옮기나
+ *
+ * 모바일에서 시트가 화면 아래를 덮으면 이 막대가 그 밑으로 들어가 **사용자에게 보이지
+ * 않는다**(Fable delta QA 2026-09-13, 390×844: 저작권 y≈825, peek 시트 상단 y≈712,
+ * half 시트 상단 y≈405 → peek·half 모두 가려짐. `elementFromPoint`도 시트를 집는다).
+ * 데스크톱(1280)은 시트가 없어 정상이다.
+ *
+ * 공식 API로 되는지 먼저 확인했다. 이 SDK 판이 내놓는 것은 `Map.setCopyrightPosition`과
+ * `kakao.maps.CopyrightPosition`뿐이고, 값은 `BOTTOMLEFT`·`BOTTOMRIGHT` 둘이다(2026-09-13
+ * 실제 SDK 프로브). **가로만 고르고 세로는 고를 수 없다.** 지도 컨테이너에 padding을 주는
+ * 방법도 없다 — 절대 배치의 기준은 padding box라 `bottom: 0`이 그대로 아래 끝이다.
+ *
+ * 남은 것은 두 가지였다. (가) 지도 host 자체를 시트 위 가시영역만큼 줄이기, (나) SDK가
+ * 아래 끝에 붙여 둔 이 막대만 가시영역 아래 끝으로 올리기. (가)는 스냅이 바뀔 때마다 지도
+ * 뷰포트가 바뀌어 **지도 내용이 따라 움직인다** — "스냅 변화에 지도는 그대로"라는 확정
+ * 동작(MapPage 프레이밍 주석)을 깨고, full 스냅에서는 지도가 80px만 남는다. 그래서 (나)다.
+ *
+ * 우리가 바꾸는 것은 이 요소의 `bottom` 한 값뿐이다. 안쪽 DOM·크기(32×10)·문구·이미지는
+ * 손대지 않고, 지우거나 가리지도 않는다 — **가려져 있던 것을 보이게 하는 방향으로만** 옮긴다.
+ *
+ * ## 찾는 방법
+ *
+ * 클래스가 없는 요소라 구조 인덱스(`children[1]`)로 집으면 SDK 판이 바뀔 때 조용히
+ * 어긋난다. 대신 **카카오 로고 링크에서 위로 올라가** host의 직계 자식을 고른다. 로고가
+ * 없으면(판이 바뀌어 모양이 달라졌으면) 아무것도 하지 않는다 — 지금 동작으로 남을 뿐
+ * 새로 깨지지는 않는다. 실제로 가려졌는지는 브라우저 QA가 따로 본다.
+ */
+const KAKAO_LOGO_SELECTOR = 'a[href*="map.kakao.com"]'
+/** 시트 윗면과 막대 사이 숨 쉴 틈. 시트 그림자 위로 글자가 읽히게 한다. */
+const ATTRIBUTION_GAP = 4
+
+function findCopyrightBar(host: HTMLElement): HTMLElement | null {
+  const logo = host.querySelector<HTMLElement>(KAKAO_LOGO_SELECTOR)
+  if (logo === null) return null
+  let node: HTMLElement | null = logo
+  while (node !== null && node.parentElement !== host) node = node.parentElement
+  return node
+}
+
+/**
  * 지도가 붙는 요소를 만든다. 자리를 채우기만 하는 빈 상자다.
  *
  * 인라인 스타일 두 줄을 여기 두는 이유: 이 요소는 **CSS Module 밖에서** 만들어지므로
@@ -234,6 +281,10 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
   const casingRef = useRef<KakaoNamespace>(null)
   const lineRef = useRef<KakaoNamespace>(null)
   const destRef = useRef<KakaoNamespace>(null)
+  /** 카카오 저작권·축척 막대와 SDK가 원래 준 `bottom`. 되돌릴 때 그 값을 쓴다. */
+  const barRef = useRef<HTMLElement | null>(null)
+  const barBaseBottomRef = useRef<string | null>(null)
+  const attributionInsetRef = useRef(0)
   const [status, setStatus] = useState<MapStatus>(JS_KEY ? 'loading' : 'disabled')
   const [attempt, setAttempt] = useState(0)
 
@@ -257,6 +308,35 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
       mapRef.current?.relayout?.()
     }
   }, [])
+
+  /**
+   * 기억해 둔 inset을 저작권 막대에 다시 바른다.
+   *
+   * 지도가 막 만들어졌을 때·자리가 바뀌었을 때도 불린다. SDK가 막대를 다시 만들면 들고
+   * 있던 참조가 문서에서 떨어지므로 그때만 다시 찾는다.
+   */
+  const applyAttributionInset = useCallback(() => {
+    const host = hostRef.current
+    if (host === null) return
+    if (barRef.current === null || !host.contains(barRef.current)) {
+      barRef.current = findCopyrightBar(host)
+      barBaseBottomRef.current = null
+    }
+    const bar = barRef.current
+    if (bar === null) return
+    // SDK가 준 자리를 한 번 기억한다. 빈 문자열로 지우면 SDK의 인라인 값까지 함께 지워진다.
+    if (barBaseBottomRef.current === null) barBaseBottomRef.current = bar.style.bottom || '0px'
+    const inset = attributionInsetRef.current
+    bar.style.bottom = inset > 0 ? `${Math.round(inset) + ATTRIBUTION_GAP}px` : barBaseBottomRef.current
+  }, [])
+
+  const setAttributionInset = useCallback(
+    (bottomInset: number) => {
+      attributionInsetRef.current = Number.isFinite(bottomInset) ? Math.max(0, bottomInset) : 0
+      applyAttributionInset()
+    },
+    [applyAttributionInset],
+  )
 
   useEffect(() => {
     if (!JS_KEY) return
@@ -285,6 +365,8 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
           const picked = fromKakao(event.latLng.getLat(), event.latLng.getLng())
           if (picked !== null) optionsRef.current.onPinPlace?.(picked)
         })
+        // 막대는 지도를 만들면서 생긴다. 화면이 알려 둔 inset을 곧바로 반영한다.
+        applyAttributionInset()
         setStatus('ready')
       })
       .catch(() => {
@@ -294,7 +376,7 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
     return () => {
       cancelled = true
     }
-  }, [attempt])
+  }, [attempt, applyAttributionInset])
 
   // 지도 요소의 크기가 바뀌면(데스크톱 ↔ 모바일 전환) 타일 배치를 다시 계산한다.
   //
@@ -306,10 +388,12 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
     if (host === null || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
       mapRef.current?.relayout?.()
+      // 크기가 바뀌면 SDK가 컨트롤을 다시 그리기도 한다. 올려 둔 자리를 다시 바른다.
+      applyAttributionInset()
     })
     observer.observe(host)
     return () => observer.disconnect()
-  }, [status])
+  }, [status, applyAttributionInset])
 
   const toLatLng = useCallback((point: Point) => {
     const kakao = kakaoRef.current
@@ -457,8 +541,8 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
   }, [])
 
   const map = useMemo<MapController>(
-    () => ({ attach, centerOn, setPin, setRoute, recenter, zoomBy, retry }),
-    [attach, centerOn, setPin, setRoute, recenter, zoomBy, retry],
+    () => ({ attach, centerOn, setPin, setRoute, setAttributionInset, recenter, zoomBy, retry }),
+    [attach, centerOn, setPin, setRoute, setAttributionInset, recenter, zoomBy, retry],
   )
 
   return useMemo(() => ({ status, map }), [status, map])

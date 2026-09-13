@@ -53,7 +53,7 @@ import {
 import { toComparePath } from '../geo/compareUrl'
 import { useAnalysis } from '../hooks/useAnalysis'
 import { useCandidates } from '../hooks/useCandidates'
-import { useLayoutMode, useMediaQuery } from '../hooks/useLayoutMode'
+import { useLayoutMode, useMediaQuery, type LayoutMode } from '../hooks/useLayoutMode'
 import { useRoute, type RouteTarget } from '../hooks/useRoute'
 import { useKakaoMap, type MapPin } from '../kakao/useKakaoMap'
 import type { ErrorAction } from '../status/labels'
@@ -225,55 +225,110 @@ export function MapPage() {
     map.setPin(pinRef.current)
   }, [mapStatus, map, pinKey])
 
+  // --- 프레이밍(중심 이동·경로 fit)과 배치별 inset -----------------------------
+  //
   // 중심 이동은 **확정 좌표가 바뀔 때만**. 핀 드래그·탭·스냅 변화·행 확장에는 지도가 그대로다.
   //
-  // 시트가 이번 렌더에서 half로 바뀌는 중이면(핀 → 여기 분석: peek → half) 지금의 inset은 아직 peek
-  // 높이다. 그대로 중심을 잡으면 핀이 half 시트 위 가시영역 중앙이 아니라 그 아래에 놓인다(실제
-  // 카카오 QA 2026-09-12: 360×740에서 177px 자리에 304px). 새 높이가 onHeightChange로 오면 그때 잡는다.
+  // 두 프레이밍은 모두 "시트가 가린 높이(inset)"를 입력으로 받는데, 그 값은 **배치마다
+  // 다르다.** 배치가 막 바뀐 커밋에서는 이전 배치에서 잰 값이 아직 ref에 남아 있다. 그대로
+  // 쓰면 데스크톱에 막 들어온 지도가 모바일 시트 높이만큼 위로 밀린다(Fable delta QA
+  // 2026-09-13, 390×844 → 1280×800: 핀 y≈191·경로 bbox 107~277. 1280으로 바로 들어오면
+  // 핀 y≈400·경로 bbox 229~571).
+  //
+  // 그래서 inset과 **그 값을 잰 배치**를 함께 들고 다닌다. 둘이 어긋나면 프레이밍을 미루고,
+  // 값이 확정되는 순간(패널은 즉시 0, 시트는 Sheet의 onHeightChange) 미뤄둔 것을 실행한다.
+  // 시트가 이번 렌더에서 half로 바뀌는 중일 때 지금의 peek 높이로 중심을 잡던 기존 보정도
+  // 같은 장치다(실제 카카오 QA 2026-09-12: 360×740에서 177px 자리에 304px).
   const snapRef = useRef(snap)
   snapRef.current = snap
-  const centerWhenSheetSettles = useRef(false)
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
+  /** `insetRef.current`를 잰 배치. 배치가 바뀌면 다시 확정될 때까지 어긋난 채로 둔다. */
+  const insetLayoutRef = useRef<LayoutMode | null>(null)
+  const centerPending = useRef(false)
+  const routeFitPending = useRef(false)
+
+  const drawn = route.drawn
+  const drawnLine = useMemo<LonLatPair[] | null>(
+    () =>
+      drawn === null
+        ? null
+        : drawn.geometry.coordinates
+            .filter((pair) => pair.length >= 2)
+            .map(([lon, lat]) => [lon, lat] as LonLatPair),
+    [drawn],
+  )
+  const drawnLineRef = useRef(drawnLine)
+  drawnLineRef.current = drawnLine
+
+  const fitRoute = useCallback(
+    (inset: number) => {
+      const line = drawnLineRef.current
+      if (line === null) {
+        map.setRoute(null, 0)
+        return
+      }
+      // 모바일은 플로팅 상단바가 지도 위 0~72px을 가린다. 데스크톱 패널 배치에는 상단바가 없다.
+      map.setRoute({ line }, inset, layoutRef.current === 'sheet' ? TOPBAR_H : 0)
+    },
+    [map],
+  )
+
+  // **아래 두 프레이밍 effect보다 먼저 선언한다.** 같은 커밋에서 effect는 선언 순서로 도니,
+  // 패널로 넘어온 커밋에서 inset 0이 그 자리에서 확정되어 곧바로 쓰인다.
   useEffect(() => {
-    if (mapStatus !== 'ready' || fixedRef.current === null) return
-    if (layout === 'sheet' && snapRef.current !== 'half') {
-      centerWhenSheetSettles.current = true
+    if (layout === 'panel') {
+      insetRef.current = 0
+      insetLayoutRef.current = 'panel'
+      setBottomInset(0)
+      map.setAttributionInset(0)
       return
     }
+    // 시트 높이는 Sheet가 onHeightChange로 알려준다. 그 전까지는 패널의 0을 쓰지 않는다.
+    // (첫 마운트에서는 자식인 Sheet의 effect가 먼저 돌아 이미 'sheet'다 — 덮지 않는다.)
+    if (insetLayoutRef.current !== 'sheet') insetLayoutRef.current = null
+  }, [layout, map])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || fixedRef.current === null) return
+    if (insetLayoutRef.current !== layout || (layout === 'sheet' && snapRef.current !== 'half')) {
+      centerPending.current = true
+      return
+    }
+    centerPending.current = false
     map.centerOn(fixedRef.current, insetRef.current)
   }, [mapStatus, map, fixedKey, layout])
 
-  const drawn = route.drawn
   useEffect(() => {
     if (mapStatus !== 'ready') return
-    if (drawn === null) {
-      map.setRoute(null, 0)
+    // 경로를 지우는 것은 inset과 무관하다. 미룰 이유가 없다.
+    if (drawnLine !== null && insetLayoutRef.current !== layout) {
+      routeFitPending.current = true
       return
     }
-    const line = drawn.geometry.coordinates
-      .filter((pair) => pair.length >= 2)
-      .map(([lon, lat]) => [lon, lat] as LonLatPair)
-    // 모바일은 플로팅 상단바가 지도 위 0~72px을 가린다. 데스크톱 패널 배치에는 상단바가 없다.
-    map.setRoute({ line }, insetRef.current, layout === 'sheet' ? TOPBAR_H : 0)
-  }, [mapStatus, map, drawn, layout])
+    routeFitPending.current = false
+    fitRoute(insetRef.current)
+  }, [mapStatus, drawnLine, layout, fitRoute])
 
   const onSheetHeight = useCallback(
     (height: number) => {
       const inset = layout === 'panel' ? 0 : height
       insetRef.current = inset
+      insetLayoutRef.current = layout
       setBottomInset(inset)
-      if (centerWhenSheetSettles.current && fixedRef.current !== null) {
-        centerWhenSheetSettles.current = false
+      // 카카오 저작권·축척 막대를 시트 위로 올린다(Fable delta QA 2026-09-13).
+      map.setAttributionInset(inset)
+      if (centerPending.current && fixedRef.current !== null) {
+        centerPending.current = false
         map.centerOn(fixedRef.current, inset)
       }
+      if (routeFitPending.current) {
+        routeFitPending.current = false
+        fitRoute(inset)
+      }
     },
-    [layout, map],
+    [layout, map, fitRoute],
   )
-  useEffect(() => {
-    if (layout === 'panel') {
-      insetRef.current = 0
-      setBottomInset(0)
-    }
-  }, [layout])
 
   // --- 행동 -----------------------------------------------------------------
   const goToSearchResult = useCallback(
