@@ -56,6 +56,8 @@ def _handler(duration: float = 360.0, snap: float = 4.0):
                 "durations": [[duration] * count],
                 "distances": [[duration * 1.3] * count],
                 "destinations": [{"distance": snap}] * count,
+                # 실제 OSRM은 성공한 `/table`에 항상 sources를 싣는다.
+                "sources": [{"location": [CENTER_LON, CENTER_LAT], "distance": 3.0}],
             },
         )
 

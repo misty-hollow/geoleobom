@@ -1,0 +1,183 @@
+/* 비교표 (DESIGN.md 14절, 보정 B: 후보 열 72~80, 스크롤 허용) */
+
+.scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.table {
+  width: 100%;
+  /* 최소 폭은 CompareTable이 열 수로 계산해 inline style로 준다(첫 열 + n × --compare-col-min). */
+  table-layout: fixed;
+}
+
+.table th,
+.table td {
+  /* 좌우 4: 76px 열에 `127.14020`(12px tabular) 한 줄과 상태 문구 2줄이 들어가야 한다. */
+  padding: var(--s-2) var(--s-1);
+  vertical-align: middle;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  font-weight: var(--w-400);
+}
+
+.table tr:last-child th,
+.table tr:last-child td {
+  border-bottom: 0;
+}
+
+.first {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: var(--compare-first-col);
+  min-width: var(--compare-first-col);
+  text-align: left;
+  background: var(--paper);
+  box-shadow: 1px 0 0 var(--line);
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  padding-left: var(--pad-x);
+}
+
+.firstSub {
+  display: block;
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+  color: var(--ink-500);
+}
+
+.head {
+  vertical-align: bottom;
+  height: 64px;
+}
+
+.headItem {
+  font-size: var(--t-caption);
+  color: var(--ink-500);
+}
+
+.headLink {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  color: var(--ink-900);
+  min-height: var(--tap);
+  justify-content: flex-end;
+}
+
+.headName {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  font-weight: var(--w-600);
+}
+
+.headCoord {
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+  color: var(--ink-500);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cell {
+  width: var(--compare-col);
+  min-width: var(--compare-col);
+  min-height: var(--row-h);
+  height: var(--row-h);
+  font-variant-numeric: tabular-nums;
+}
+
+.time {
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-900);
+  white-space: nowrap;
+}
+
+.statusCell {
+  display: inline-block;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  font-weight: var(--w-600);
+  word-break: keep-all;
+  text-align: right;
+}
+
+.warn {
+  color: var(--warn-700);
+}
+
+.muted {
+  color: var(--muted-700);
+}
+
+.best {
+  background: var(--accent-100);
+  box-shadow: inset 0 -2px 0 var(--accent-600);
+}
+
+.best .time {
+  color: var(--accent-600);
+  font-weight: var(--w-600);
+}
+
+.pendingCell {
+  color: var(--ink-300);
+}
+
+.failedCell {
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+  color: var(--ink-500);
+}
+
+.bone {
+  display: inline-block;
+  width: 36px;
+  height: 14px;
+  border-radius: var(--r-1);
+  background: var(--canvas);
+}
+
+.dominantRow th,
+.dominantRow td {
+  border-top: 1px solid var(--line);
+}
+
+.dominant {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+}
+
+.dominantNum {
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+}
+
+.dominantUnit {
+  font-size: var(--t-caption);
+  color: var(--ink-500);
+}
+
+@media (min-width: 768px) {
+  .table {
+    table-layout: auto;
+  }
+  .cell {
+    width: auto;
+    min-width: var(--compare-col-wide);
+  }
+  /* 첫 열 120: 768에서 첫 열 + 4 × 160 = 760이 화면에 들어간다(160이면 800으로 4열째가 잘린다). */
+  .first {
+    width: var(--compare-first-col-wide);
+    min-width: var(--compare-first-col-wide);
+  }
+}

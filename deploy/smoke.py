@@ -1,4 +1,4 @@
-"""배포 스모크 테스트 — 픽스처 5좌표 (v2.3 5절, 10절 게이트 2).
+"""배포 스모크 테스트 — 픽스처 5좌표 + 공개 페이지 (v2.4 5절, 10절 게이트 2).
 
 5절의 데이터 교체 절차가 요구하는 "픽스처 5좌표 스모크 테스트"와, 10절 게이트 2의
 "픽스처 5좌표의 기대값을 기록(이후 회귀 테스트)"을 같은 스크립트로 수행한다.
@@ -26,11 +26,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import re
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -110,6 +113,26 @@ def _check_facility(category: str, label: str, facility: dict[str, Any]) -> list
     return problems
 
 
+EARTH_RADIUS_M = (
+    6_371_008.8  # IUGG 평균 반지름. api/app/analysis/coords.py와 같은 값이다.
+)
+# 좌표 5자리(약 1m)와 부동소수점 왕복을 감안한 여유. 이보다 크게 어긋나면 좌표와 거리가
+# 서로 다른 두 점을 가리키고 있는 것이다.
+SNAP_DISTANCE_TOLERANCE_M = 1.0
+
+
+def haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    """두 좌표 사이 대권거리(m). 서버 구현과 같은 식이다 — 여기서 **독립적으로** 다시 잰다."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = phi2 - phi1
+    dlambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
+    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
 def check_contract(
     body: dict[str, Any], *, requested: tuple[float, float] | None = None
 ) -> list[str]:
@@ -163,6 +186,30 @@ def check_contract(
             snapped.get(key), bool
         ):
             problems.append(f"snapped.{key}가 수가 아니다: {snapped.get(key)!r}")
+    # **`snap_distance_m`은 `input`에서 `snapped`까지의 거리다** (2026-09-12 확정 ⓑ).
+    #
+    # 데이터 판본과 무관하게 성립하는 의미 불변식이라 기준값 파일 없이도 검사할 수 있다.
+    # 어긋나면 좌표는 한 지점의 것인데 거리는 다른 구간의 것 — 서로 다른 스냅이 섞인
+    # 응답이다. 상류가 준 숫자를 그대로 실으면 정확히 그렇게 된다.
+    if all(
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        for value in (
+            coord.get("lon"),
+            coord.get("lat"),
+            snapped.get("lon"),
+            snapped.get("lat"),
+            snapped.get("snap_distance_m"),
+        )
+    ):
+        measured = haversine_m(
+            coord["lon"], coord["lat"], snapped["lon"], snapped["lat"]
+        )
+        if abs(measured - snapped["snap_distance_m"]) > SNAP_DISTANCE_TOLERANCE_M:
+            problems.append(
+                f"snap_distance_m({snapped['snap_distance_m']:.2f}m)이 input→snapped "
+                f"실측({measured:.2f}m)과 다르다 — 좌표와 거리가 다른 두 점을 가리킨다"
+            )
+
     warnings = body["warnings"]
     if not isinstance(warnings, list) or not all(isinstance(w, str) for w in warnings):
         problems.append(f"warnings가 문자열 배열이 아니다: {warnings!r}")
@@ -332,6 +379,89 @@ def check_contract(
     return problems
 
 
+# `/route`가 분석과 같은 지점에서 출발했는지 볼 때 쓰는 여유. OSRM은 좌표를 1e-6도
+# 고정소수점으로 들고 있으므로 **그 눈금 단위 정수로** 비교한다(api/app/contract.py와
+# 같은 기준). 도(度) 실수로 빼면 한 눈금 차이가 이진 표현 오차 때문에 1e-6보다 커진다.
+OSRM_COORD_SCALE = 1_000_000
+ROUTE_SNAP_EPSILON_TICKS = 1
+
+
+def _ticks(degrees: float) -> int:
+    return round(degrees * OSRM_COORD_SCALE)
+
+
+def check_route_uses_the_same_snap(
+    base_url: str, body: dict[str, Any], lon: float, lat: float, timeout_s: float
+) -> list[str]:
+    """`/route`의 출발지가 분석의 `snapped`와 **같은 지점**인지 (v2.4 4-3 10단계).
+
+    데이터 판본과 무관한 의미 불변식이라 기준값 파일 없이 성립해야 한다. 기준값은
+    "이번 데이터에서 이런 값이 나왔다"를 기록할 뿐이고, 이 검사는 **어떤 데이터에서도
+    깨지면 안 되는 것**을 본다. 그래서 옛 롤백 산출물의 기준값과 부딪히지 않는다.
+
+    경로를 그릴 시설이 하나도 없으면(모두 unreachable·none) 조용히 건너뛴다 — 그것은
+    이 불변식의 위반이 아니다.
+    """
+    problems: list[str] = []
+    fid = None
+    for item in body.get("nearest", []):
+        if item.get("status") == "ok" and item.get("best"):
+            fid = item["best"]["fid"]
+            break
+    if fid is None:
+        return problems
+
+    query = urllib.parse.urlencode(
+        {"lon": f"{lon:.5f}", "lat": f"{lat:.5f}", "fid": str(fid)}
+    )
+    url = f"{base_url.rstrip('/')}/api/route?{query}"
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            route = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        exc.read()
+        if exc.code == 501:
+            # **통과시키지 않는다.** 현재 배포본에서 /route가 501이면 그것은 진짜 결함이다.
+            # 다만 되돌린 옛 산출물에 이 스모크를 잘못 붙였을 때도 같은 모양이 나오므로,
+            # 어느 쪽인지 사람이 바로 알 수 있게 적어 준다 (Astra delta D3).
+            return [
+                (
+                    "/route가 501이다. 현재 배포본이라면 이것은 결함이다. "
+                    "되돌린 산출물을 확인하는 중이라면 **이 스모크가 그 산출물의 것이 "
+                    "아니다** — rollback.sh가 알려 준 그 커밋의 deploy/smoke.py로 확인해라."
+                )
+            ]
+        return [f"/route가 HTTP {exc.code} (분석이 실은 fid {fid}인데 경로가 없다)"]
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return [f"/route 요청 실패 {exc}"]
+
+    origin = route.get("snapped_origin") or {}
+    snapped = body["snapped"]
+    for key in ("lon", "lat"):
+        if not isinstance(origin.get(key), (int, float)):
+            problems.append(f"/route 응답에 snapped_origin.{key}가 없다")
+    if problems:
+        return problems
+    if (
+        abs(_ticks(origin["lon"]) - _ticks(snapped["lon"])) > ROUTE_SNAP_EPSILON_TICKS
+        or abs(_ticks(origin["lat"]) - _ticks(snapped["lat"]))
+        > ROUTE_SNAP_EPSILON_TICKS
+    ):
+        problems.append(
+            "/route의 출발지가 분석의 snapped와 다른 지점이다 "
+            f"(analyze {snapped['lon']},{snapped['lat']} vs route {origin['lon']},{origin['lat']}) "
+            "— 4-3 10단계"
+        )
+
+    # 같은 배포 세대에서 나온 값이어야 한다(4-4). 여기서 갈리면 화면이 stale로 간다.
+    if route.get("versions") != body.get("versions"):
+        problems.append(
+            f"/route versions가 분석과 다르다: {route.get('versions')} != {body.get('versions')}"
+        )
+    return problems
+
+
 def summarise(body: dict[str, Any]) -> dict[str, Any]:
     """회귀 대조에 쓸 요약. 시각처럼 매번 달라지는 값은 넣지 않는다."""
     return {
@@ -356,6 +486,143 @@ def summarise(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# --- 정적 페이지 (v2.4 3절 공유, 4-1) -------------------------------------
+#
+# `/p/{좌표}`는 서버에 그런 파일이 없다. Caddy의 SPA fallback(`try_files`)이 index.html을
+# 돌려줘야 공유 링크를 직접 열거나 새로고침할 때 200이 된다. **설정만 보고 "되겠지"로
+# 넘어가지 않는다** — 실제 응답을 확인한다.
+
+PAGE_MARKER = '<div id="root">'
+
+
+def fetch_page(base_url: str, path: str, timeout_s: float) -> tuple[int, str, str]:
+    """(상태코드, content-type, 본문). 4xx·5xx도 예외로 만들지 않고 그대로 돌려준다."""
+    url = f"{base_url.rstrip('/')}{path}"
+    request = urllib.request.Request(url, headers={"Accept": "text/html"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            return (
+                response.status,
+                response.headers.get("Content-Type", ""),
+                response.read().decode("utf-8", "replace"),
+            )
+    except urllib.error.HTTPError as exc:
+        return (
+            exc.code,
+            exc.headers.get("Content-Type", "") if exc.headers else "",
+            exc.read().decode("utf-8", "replace"),
+        )
+
+
+ASSET_PATTERN = re.compile(r'(?:src|href)="(/assets/[A-Za-z0-9._-]+)"')
+
+
+def fetch_asset(base_url: str, path: str, timeout_s: float) -> tuple[int, int]:
+    """(상태코드, 바이트 수). 자산은 HTML이 아니라 **실제로 받아** 본다."""
+    url = f"{base_url.rstrip('/')}{path}"
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(url), timeout=timeout_s
+        ) as response:
+            return response.status, len(response.read())
+    except urllib.error.HTTPError as exc:
+        exc.read()
+        return exc.code, 0
+
+
+def check_assets(
+    base_url: str, html: str, timeout_s: float, *, label: str
+) -> list[str]:
+    """HTML이 가리키는 JS·CSS를 **실제로 GET 한다** (2026-09-13, Astra finding 9).
+
+    이름이 본문에 있는지만 보면 배포 전환 중 404를 잡지 못한다. 사용자가 A의 HTML을
+    받은 뒤 current가 B로 넘어가면 A의 자산은 B 디렉터리에 없고, 그 요청이 404면
+    화면이 그 자리에서 깨진다. 그 경로를 여기서 밟는다.
+    """
+    problems: list[str] = []
+    assets = sorted(set(ASSET_PATTERN.findall(html)))
+    if not assets:
+        return [f"{label}: HTML이 /assets/ 자산을 하나도 가리키지 않는다"]
+    for asset in assets:
+        try:
+            status, size = fetch_asset(base_url, asset, timeout_s)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            problems.append(f"{label}: {asset} 요청 실패 {exc}")
+            continue
+        if status != 200:
+            problems.append(
+                f"{label}: {asset}가 HTTP {status} — HTML은 200인데 자산이 없다. "
+                "배포 전환 중이면 직전 배포본에서도 찾는지 확인해라"
+            )
+        elif size == 0:
+            problems.append(f"{label}: {asset}가 빈 응답이다")
+    return problems
+
+
+def check_pages(
+    base_url: str,
+    *,
+    probe_path: str,
+    expect_asset: str | None,
+    timeout_s: float,
+    check_assets_too: bool = False,
+    also_expect_assets: Sequence[str] = (),
+) -> list[str]:
+    """`/`와 공유 URL이 실제 React 앱을 200으로 돌려주는지 확인한다.
+
+    `check_assets_too`면 그 HTML이 가리키는 자산까지 실제로 받아 본다.
+    `also_expect_assets`는 **전환 직전 HTML이 가리키던** 자산이다 — 전환 뒤에도 열려야
+    열어 둔 탭이 깨지지 않는다(Astra finding 9).
+    """
+    problems: list[str] = []
+    for path in ("/", probe_path):
+        try:
+            status, content_type, body = fetch_page(base_url, path, timeout_s)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            problems.append(f"{path}: 요청 실패 {exc}")
+            continue
+
+        if status != 200:
+            hint = (
+                " (Caddy SPA fallback이 없으면 여기서 404가 난다)"
+                if path != "/"
+                else ""
+            )
+            problems.append(f"{path}: HTTP {status}{hint}")
+            continue
+        if "text/html" not in content_type:
+            problems.append(f"{path}: content-type이 html이 아니다 ({content_type!r})")
+        if PAGE_MARKER not in body:
+            problems.append(f"{path}: React 진입점({PAGE_MARKER})이 없다")
+        # Week 1 임시 페이지가 아직 서빙되고 있으면 여기서 드러난다.
+        if "<script" not in body:
+            problems.append(
+                f"{path}: 스크립트가 없다. 임시 페이지가 남아 있는지 확인해라"
+            )
+        if expect_asset is not None and expect_asset not in body:
+            problems.append(
+                f"{path}: 이번 빌드의 자산({expect_asset})을 가리키지 않는다. "
+                "옛 배포본이 그대로 서빙되고 있다"
+            )
+        if check_assets_too:
+            problems.extend(check_assets(base_url, body, timeout_s, label=path))
+
+    # 전환 직전 HTML이 가리키던 자산. 이미 그 HTML을 받아 둔 브라우저가 지금 요청한다.
+    for asset in also_expect_assets:
+        path = asset if asset.startswith("/") else f"/{asset}"
+        try:
+            status, _ = fetch_asset(base_url, path, timeout_s)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            problems.append(f"직전 자산 {path}: 요청 실패 {exc}")
+            continue
+        if status != 200:
+            problems.append(
+                f"직전 자산 {path}: HTTP {status} — 전환 전에 HTML을 받은 브라우저가 "
+                "그 자산을 못 받는다. 열어 둔 탭이 그 자리에서 깨진다"
+            )
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="배포 스모크 테스트 (픽스처 5좌표)")
     parser.add_argument("--base-url", required=True)
@@ -377,7 +644,57 @@ def main(argv: list[str] | None = None) -> int:
         help="좌표당 반복 횟수. 2 이상이면 캐시 히트를 확인한다 "
         "(4-4: 캐시 히트는 computed_at을 새 요청 시각으로 바꾸지 않는다)",
     )
+    parser.add_argument(
+        "--pages",
+        action="store_true",
+        help="`/`와 `/p/{좌표}`가 200으로 실제 앱을 돌려주는지 함께 확인한다",
+    )
+    parser.add_argument(
+        "--pages-only",
+        action="store_true",
+        help="API 스모크 없이 페이지 확인만 한다 (deploy_web.sh가 쓴다)",
+    )
+    parser.add_argument(
+        "--probe-path",
+        default="/p/36.47130,127.14020",
+        help="공유 URL 확인에 쓸 경로. 기본값은 픽스처 첫 좌표다",
+    )
+    parser.add_argument(
+        "--expect-asset",
+        help="index.html이 이 자산 이름을 가리켜야 한다 (방금 올린 빌드인지 확인)",
+    )
+    parser.add_argument(
+        "--check-assets",
+        action="store_true",
+        help="HTML이 가리키는 JS·CSS를 실제로 GET 해 200인지 본다 "
+        "(이름이 본문에 있는지만 보면 전환 중 404를 놓친다)",
+    )
+    parser.add_argument(
+        "--expect-previous-asset",
+        action="append",
+        default=[],
+        metavar="/assets/index-XXXX.js",
+        help="전환 **직전** HTML이 가리키던 자산. 전환 뒤에도 200이어야 열어 둔 탭이 "
+        "깨지지 않는다. 여러 번 줄 수 있다",
+    )
     args = parser.parse_args(argv)
+
+    if args.pages_only:
+        problems = check_pages(
+            args.base_url,
+            probe_path=args.probe_path,
+            expect_asset=args.expect_asset,
+            timeout_s=args.timeout,
+            check_assets_too=args.check_assets,
+            also_expect_assets=args.expect_previous_asset,
+        )
+        if problems:
+            print("== 페이지 확인 실패 ==", file=sys.stderr)
+            for problem in problems:
+                print(f"  - {problem}", file=sys.stderr)
+            return 1
+        print(f"페이지 확인 통과: / 와 {args.probe_path}")
+        return 0
 
     coords = json.loads(args.coords.read_text(encoding="utf-8"))["coords"]
     baseline = (
@@ -417,6 +734,18 @@ def main(argv: list[str] | None = None) -> int:
             requested=(round(float(coord["lon"]), 5), round(float(coord["lat"]), 5)),
         )
         failures.extend(f"{spot}: {problem}" for problem in problems)
+
+        # 데이터 판본과 무관한 의미 불변식. 기준값 파일 없이도 성립해야 한다.
+        failures.extend(
+            f"{spot}: {problem}"
+            for problem in check_route_uses_the_same_snap(
+                args.base_url,
+                body,
+                float(coord["lon"]),
+                float(coord["lat"]),
+                args.timeout,
+            )
+        )
 
         if len(computed_at_seen) > 1 and len(set(computed_at_seen)) != 1:
             # 4-4: 캐시 히트는 원 계산 결과의 computed_at을 그대로 돌려준다. 값이
@@ -475,6 +804,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"--- 이번 결과 {spot}\n{json.dumps(summary, ensure_ascii=False, indent=2)}"
                 )
+
+    if args.pages:
+        failures.extend(
+            check_pages(
+                args.base_url,
+                probe_path=args.probe_path,
+                expect_asset=args.expect_asset,
+                timeout_s=args.timeout,
+                check_assets_too=args.check_assets,
+                also_expect_assets=args.expect_previous_asset,
+            )
+        )
 
     print(json.dumps(results, ensure_ascii=False, indent=2))
 

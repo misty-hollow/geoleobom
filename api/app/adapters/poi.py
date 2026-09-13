@@ -14,23 +14,14 @@ import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
+from app.analysis.coords import EARTH_RADIUS_M, haversine_m
 from app.analysis.models import Candidate
 
 TABLE = "poi"
 RTREE_TABLE = "rtree_poi_geom"
-EARTH_RADIUS_M = 6_371_008.8  # IUGG 평균 반지름
 # bbox를 아주 조금 넓히는 여유. 부동소수 오차로 경계 후보가 빠지지 않게 한다.
 # bbox는 후보를 좁히기만 하고 최종 판정은 haversine이 하므로 넓은 쪽이 안전하다.
 BBOX_MARGIN_M = 1.0
-
-
-def haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    """두 좌표 사이 대권 거리(m). 인자 순서는 내부 규약대로 [lon, lat]이다."""
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = phi2 - phi1
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
 
 
 def bbox_for(lon: float, lat: float, radius_m: float) -> tuple[float, float, float, float]:

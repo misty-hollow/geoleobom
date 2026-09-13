@@ -1,0 +1,125 @@
+/* 버튼·스피너 (DESIGN.md 9·15절) */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: var(--tap);
+  padding: 0 var(--s-4);
+  border-radius: var(--r-2);
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  font-weight: var(--w-600);
+  white-space: nowrap;
+  transition: background-color var(--dur-fade) ease-out;
+}
+
+.button:disabled {
+  opacity: 0.4;
+}
+
+.block {
+  display: flex;
+  width: 100%;
+}
+
+.primary {
+  min-height: 48px;
+  background: var(--accent-600);
+  color: var(--paper);
+}
+
+.primary:active:not(:disabled) {
+  background: var(--accent-700);
+}
+
+.secondary {
+  background: var(--paper);
+  color: var(--ink-900);
+  border: 1px solid var(--line);
+}
+
+.secondary:active:not(:disabled) {
+  background: var(--canvas);
+}
+
+.text {
+  padding: 0 var(--s-2);
+  color: var(--accent-600);
+}
+
+.text:active:not(:disabled) {
+  background: var(--canvas);
+}
+
+.icon {
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  color: var(--ink-900);
+  border-radius: var(--r-2);
+}
+
+.icon:active:not(:disabled) {
+  background: var(--canvas);
+}
+
+.floating {
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink-900);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-1);
+}
+
+.floating:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 2px var(--paper),
+    var(--shadow-1);
+}
+
+.floating:active:not(:disabled) {
+  background: var(--canvas);
+}
+
+/* hover는 데스크톱만, 배경 1단계 */
+@media (hover: hover) and (pointer: fine) {
+  .secondary:hover:not(:disabled),
+  .text:hover:not(:disabled),
+  .icon:hover:not(:disabled),
+  .floating:hover:not(:disabled) {
+    background: var(--canvas);
+  }
+  .primary:hover:not(:disabled) {
+    background: var(--accent-700);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent-600);
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: var(--ink-500);
+  }
+}

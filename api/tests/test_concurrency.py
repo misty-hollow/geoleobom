@@ -187,6 +187,8 @@ def _osrm_handler(seen: dict, hold_s: float):
                 "durations": [[360.0] * count],
                 "distances": [[468.0] * count],
                 "destinations": [{"distance": 4.0}] * count,
+                # 실제 OSRM은 성공한 `/table`에 항상 sources를 싣는다.
+                "sources": [{"location": [CENTER_LON, CENTER_LAT], "distance": 3.0}],
             },
         )
 

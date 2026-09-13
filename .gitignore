@@ -56,6 +56,10 @@ data/build/
 node_modules/
 dist/
 dist-ssr/
+# 번들 비밀값 검사(web/scripts/check-bundle.mjs)가 쓰는 임시 빌드 결과.
+dist-keycheck/
+# 브라우저 QA(web/scripts/browser-qa.mjs)의 스크린샷·보고서.
+qa-shots/
 build/
 .vite/
 *.tsbuildinfo
@@ -93,3 +97,8 @@ Desktop.ini
 *.log
 tmp/
 temp/
+
+# 롤백이 꺼내 두는 **되돌린 커밋의 deploy/**. 그 배포본의 스모크를 그 자리에서 돌린다
+# (deploy/rollback.sh, Astra delta D3). 저장소에 커밋하지 않는다 — 언제나 git에서 다시
+# 꺼낼 수 있는 사본이다.
+.rollback-release/

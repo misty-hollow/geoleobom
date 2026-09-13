@@ -22,6 +22,8 @@ import pytest
 DEPLOY = Path(__file__).resolve().parents[2] / "deploy"
 DEPLOY_API = DEPLOY / "deploy_api.sh"
 DEPLOY_DATA = DEPLOY / "deploy_data.sh"
+DEPLOY_WEB = DEPLOY / "deploy_web.sh"
+WEB_RELEASE = DEPLOY / "web_release.sh"
 ROLLBACK = DEPLOY / "rollback.sh"
 
 
@@ -49,6 +51,16 @@ def deploy_data() -> str:
 @pytest.fixture(scope="module")
 def rollback() -> str:
     return _code(ROLLBACK)
+
+
+@pytest.fixture(scope="module")
+def deploy_web() -> str:
+    return _code(DEPLOY_WEB)
+
+
+@pytest.fixture(scope="module")
+def web_release() -> str:
+    return _code(WEB_RELEASE)
 
 
 # --- 1. data_version 불변성 ---------------------------------------------------
@@ -236,6 +248,27 @@ def test_code_rollback_restores_config_and_image_together(rollback: str):
     assert "caddy reload" in rollback, "설정을 되돌리고 Caddy를 다시 읽히지 않는다"
 
 
+def test_code_rollback_points_at_the_restored_release_smoke(rollback: str):
+    """되돌린 뒤 **그 배포본의 스모크**를 돌리라고 안내한다 (Astra delta D3).
+
+    작업 트리의 `deploy/smoke.py`는 **지금 계약**을 본다. 되돌린 API가 그보다 이전이면
+    (base 9212bcf의 `/api/route`는 501이다) 정상 복구인데도 실패로 나온다. 이미 그
+    커밋의 `deploy/`를 꺼내 설정을 되돌리고 있으므로, 같은 곳의 `smoke.py`를 쓰면
+    계약이 저절로 맞는다.
+
+    "501이면 건너뛴다"로 푸는 것은 금지다 — 현재 배포본에서 /route가 501이면 그것은
+    진짜 결함인데 통과해 버린다. 그래서 고치는 자리는 **어느 검사를 쓰는가**다.
+    """
+    # 꺼낸 deploy/를 지우지 않고 남긴다. mktemp + trap rm이면 스모크를 돌릴 수 없다.
+    assert "RESTORED_DIR=" in rollback, "되돌린 커밋의 deploy/를 남길 자리가 없다"
+    assert 'rm -rf "$STAGE_DIR"' not in rollback
+    assert 'RESTORED_SMOKE="$RESTORED_DIR/deploy/smoke.py"' in rollback
+    # 최종 안내가 **그 스모크**를 가리킨다.
+    assert "python $RESTORED_SMOKE --base-url" in rollback
+    # 작업 트리의 스모크를 그냥 돌리라고 하지 않는다.
+    assert 'echo "  python deploy/smoke.py --base-url https://geoleobom.kr"' not in rollback
+
+
 def test_code_rollback_reads_the_smoke_verified_recovery_point(rollback: str):
     assert ".env.last-good" in rollback
     # 이전 방식 파일로 되돌아가는 경로가 있다면 그것이 검증 기록이 아님을 말해야 한다.
@@ -279,3 +312,59 @@ def test_usage_examples_do_not_upload_into_an_existing_version(deploy_data: str)
         assert "--version 2026Q3-cc-01" not in line, f"이미 배포된 버전을 예시로 쓴다: {line}"
         assert "--version synthetic-cc-01" not in line, f"이미 배포된 버전을 예시로 쓴다: {line}"
     assert "버전 이름을 그대로 재사용하지 마라" in text
+
+
+# --- 5. 웹 릴리스 디렉터리의 불변성 (2026-09-13, Astra finding 4) ---------------
+#
+# 실제 동작은 `deploy/web_release_test.sh`가 **그 함수를 돌려서** 검사한다(CI에서 돈다).
+# 여기서는 배포 스크립트가 그 함수를 쓰고, 예전의 파괴적인 줄로 돌아가지 않았는지 본다.
+
+
+def test_web_deploy_never_deletes_an_existing_release(deploy_web: str, web_release: str):
+    """`rm -rf '$COMMIT_SHA'`가 돌아오면 롤백 대상을 지우는 배포가 된다.
+
+    같은 SHA를 다른 JS 키로 다시 빌드하면 바이트가 다른데 이름은 같다. 예전 줄은 그때
+    기존 디렉터리를 지우고 덮어써서, `previous`가 그 SHA를 가리키고 있으면 되돌아갈
+    곳이 사라졌다.
+    """
+    for source, name in ((deploy_web, "deploy_web.sh"), (web_release, "web_release.sh")):
+        assert 'rm -rf "$root/$release"' not in source, name
+        assert "rm -rf '$COMMIT_SHA'" not in source, name
+        assert 'rm -rf "$COMMIT_SHA"' not in source, name
+
+
+def test_web_deploy_uses_the_shared_release_functions(deploy_web: str):
+    """서버에서 도는 로직이 한 벌이어야 검사한 것과 배포되는 것이 같다."""
+    assert "web_release.sh" in deploy_web
+    assert "install_release" in deploy_web
+    assert "switch_current" in deploy_web
+
+
+def test_web_release_compares_a_digest_before_reusing_an_id(web_release: str):
+    """같은 릴리스 ID에 다른 산출물이면 **실패해야** 한다. 조용히 덮어쓰지 않는다."""
+    assert "release_digest" in web_release
+    assert "return 1" in web_release
+
+
+def test_link_switches_are_atomic(web_release: str, rollback: str):
+    """`ln -sfn`은 지우고 다시 만드는 두 단계라 링크가 없는 순간이 있다.
+
+    배포와 롤백이 **같은** 방식으로 링크를 걸어야 그 틈이 어느 쪽에도 없다.
+    """
+    assert "mv -T" in web_release, "원자적 전환이 없다"
+    # 웹 롤백도 같은 함수를 쓴다.
+    assert "atomic_link" in rollback
+
+
+def test_web_rollback_still_deletes_nothing(rollback: str):
+    """웹 롤백은 링크만 맞바꾼다. 어느 쪽도 지우지 않아야 다시 앞으로 갈 수 있다."""
+    web_block = rollback.split("web)", 1)[1].split(";;", 1)[0]
+    assert "rm -rf" not in web_block, web_block
+
+
+def test_web_deploy_checks_the_previous_assets_after_switching(deploy_web: str):
+    """전환 직전 HTML이 가리키던 자산이 전환 뒤에도 열리는지 확인한다 (finding 9)."""
+    assert "--check-assets" in deploy_web, "자산을 실제로 받아 보지 않는다"
+    assert "--expect-previous-asset" in deploy_web, "직전 자산을 확인하지 않는다"
+    # 전환 **전에** 읽어야 의미가 있다. 순서를 고정한다.
+    assert deploy_web.index("PREVIOUS_ASSETS=") < deploy_web.index("switch_current")

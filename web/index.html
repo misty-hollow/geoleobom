@@ -2,9 +2,28 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#FFFFFF" />
     <meta name="robots" content="noindex, nofollow" />
-    <title>걸어봄</title>
+    <!--
+      공유 URL `/p/{좌표}`가 카카오 같은 외부 요청의 Referer로 새지 않게 한다 (v2.4 5절).
+
+      `strict-origin-when-cross-origin`:
+        - 같은 출처  -> 전체 URL (우리 서버로만 간다. Caddy·API 로그가 헤더를 지운다)
+        - 다른 출처  -> **origin만** (경로·쿼리가 빠진다)
+        - https -> http 강등 -> 아무것도 보내지 않는다
+
+      origin은 남긴다. 카카오 JS SDK의 **허용 도메인 검증이 그 값을 본다** — 통째로
+      막으면(`no-referrer`) 지도가 뜨지 않는다. 운영에서는 Caddy가 같은 값을 응답
+      헤더로도 보낸다(deploy/Caddyfile). 여기 meta는 개발 서버와 로컬 preview에서도
+      같은 정책이 걸리게 하는 이중 장치다.
+    -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta
+      name="description"
+      content="위치 하나로 생활시설까지 보행망 기준 예상 도보시간을 확인하는 웹앱"
+    />
+    <title>걸어봄 — 이 집, 걸어서 살 만해?</title>
   </head>
   <body>
     <div id="root"></div>
