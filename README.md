@@ -117,7 +117,34 @@ GEOLEOBOM_DATA_DIR=<절대경로>/data/build/local-dev GEOLEOBOM_DATA_VERSION=lo
 cd api  && .venv/Scripts/python.exe -m ruff check . && .venv/Scripts/python.exe -m ruff format --check . && .venv/Scripts/python.exe -m pytest -q
 cd data && .venv/Scripts/python.exe -m ruff check . && .venv/Scripts/python.exe -m ruff format --check . && .venv/Scripts/python.exe -m pytest -q
 cd web  && npm run build     # tsc -b + vite build → web/dist
+cd web  && npm test && npm run check:boundaries && npm run check:bundle && npm run check:qa
 ```
+
+`check:qa`는 브라우저 QA의 **포커스 표시 판정 논리**를 손계산 값과 false-green 반례로
+검사한다(`web/scripts/qa-focus.selftest.mjs`). 브라우저 QA 자체는 사람이 돌리는 도구라
+CI가 그 판정을 한 번도 실행하지 않으므로, 판정만 떼어 CI에서 본다.
+
+도커가 필요한 검사 둘은 개발 PC에서 돌린다. **CI는 도커 안에서 도커를 띄우지 않는다.**
+
+```
+python deploy/caddy_check.py
+```
+
+저장소 `deploy/Caddyfile`을 그대로 `caddy:2.11.4-alpine`에 넣고 실제 요청을 보낸 뒤 로그를
+읽는다. 주소와 프록시 대상 두 줄만 바꾼다. 보는 것: 정상 `/p`·퍼센트 인코딩·대문자·중복
+슬래시·경로 순회·쿼리 문자열·`Referer` 어디에도 좌표·검색어가 남지 않는지, 그리고 배포
+전환 중 **직전 배포본의 자산이 열리는지**. 대조군(허용 목록 템플릿은 남고, 둘 다에 없는
+자산은 404)이 같은 실행에 들어 있어 필터가 아무것도 하지 않는 상태가 통과로 보이지 않는다.
+
+```
+docker run --rm -v "$PWD":/repo -w /repo bash:5 bash deploy/web_release_test.sh
+```
+
+서버에서 도는 릴리스 함수(`deploy/web_release.sh`)를 임시 디렉터리에서 실제로 돌린다.
+같은 릴리스 재배포·같은 ID에 다른 산출물·전송 손상·불완전 업로드에서 **있던 바이트와
+current 링크가 지켜지는지** 본다. **심볼릭 링크가 POSIX처럼 동작해야** 의미가 있어
+Linux에서 돌린다 — 개발 PC의 Git Bash는 `ln -s`가 복사본을 만들므로 검사가 통과가 아니라
+`exit 2`로 멈춘다. CI(ubuntu)의 `repository-baseline`에도 이 단계가 있다.
 
 실제 OSRM이 필요한 검사는 기본 실행에서 제외된다(`real_osrm` 마커). OSRM을 띄운 뒤에만 돌린다.
 
@@ -128,10 +155,10 @@ data/.venv/Scripts/python.exe data/osrm/verify_table.py --out data/osrm/build/ta
 
 CI(`.github/workflows/ci.yml`)는 네 작업이다.
 
-- `repository-baseline` — 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값
+- `repository-baseline` — 변경 줄 공백 오류, Compose 설정, Caddy 설정, Git 이력 비밀값, 배포 셸 문법, **웹 릴리스 회귀**(`deploy/web_release_test.sh`)
 - `api-checks` — ruff + pytest. 계약 검사 세 벌: `test_contract_v22.py`(v2.3에서 값이 바뀌지 않은 상수), `test_contract_v23.py`(v2.3이 새로 정한 필수·nullable·UTC 표현), `test_contract_v24.py`(v2.4의 `/route` `versions`·스냅 일치·없는 `fid`). 계산 검사는 합성 후보와 모의 OSRM을 쓴다. 실제 OSRM 검사(`real_osrm` 마커)는 제외
 - `data-checks` — ruff + pytest. 작은 합성 픽스처만 쓴다. 실데이터·OSRM 빌드는 돌리지 않는다
-- `web-build` — `tsc -b` + `vite build`
+- `web-build` — `tsc -b` + `vite build` + 경계·생성 타입 diff·vitest·번들 센티널 + **브라우저 QA 포커스 판정 자체 검사**(`npm run check:qa`)
 
 별도 워크플로 `release-api.yml`의 `api-image`가 Dockerfile 빌드와 컨테이너 기동을 확인한다(PR에서는 게재하지 않는다).
 
