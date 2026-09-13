@@ -16,6 +16,25 @@
 미달이면 증설로 해결된 것으로 취급하지 않는다"라고 정했으므로 이 구분이 판정에 직접
 쓰인다.
 
+## 이 도구가 재는 것과 재지 않는 것 (2026-09-13, Astra finding 8)
+
+재는 것은 **HTTP 단계 세 번의 왕복**이다 — `/api/search`, `/api/analyze`, `/api/route`를
+순서대로 부르고 각각의 응답을 다 받을 때까지. `flow`는 그 셋의 합이다.
+
+**사용자가 검색 결과를 고른 뒤 화면에 경로가 그려질 때까지의 시간이 아니다.** 거기에는
+카카오 SDK 내려받기, 번들 파싱, 지도 타일 수신, 경로선 렌더, 시트 애니메이션이 더
+들어가는데 이 도구는 그중 무엇도 재지 않는다. 둘을 같은 숫자로 읽으면 게이트 2 판정이
+실제보다 후해진다. 화면 시간은 브라우저 QA로 따로 본다.
+
+**이 도구는 게이트 통과를 선언하지 않는다.** 숫자를 기록할 뿐이고, 기준 대조와 판정은
+사람이 PROJECT.md의 게이트 기록에 적는다.
+
+## 실패한 회차는 통계에 넣지 않는다
+
+경로가 오지 않은 라운드는 "검색 → 분석 → 경로 표시" 흐름을 잰 것이 아니다. 예전에는
+`route`가 502여도 exit 0이었고 그 회차의 시간이 `flow` 중앙값에 섞였다 — 502는 빨리
+오므로 **중앙값이 성공했을 때보다 짧게** 나오기까지 했다.
+
 ## 캐시를 조심한다
 
 같은 좌표를 두 번 부르면 두 번째는 캐시 히트라 서버 내부 시간이 거의 0이다. 실제로
@@ -43,6 +62,8 @@ import urllib.request
 from typing import Any
 
 DEFAULT_TIMEOUT_S = 30.0
+# 마지막 실행의 보고서. 검사가 판정을 들여다볼 수 있게 둔다(파일로 쓰지 않는다).
+LAST_REPORT: dict[str, Any] = {}
 # 캐시 미스를 만들 때 움직이는 폭. 5번째 소수 자리(약 1m)라 같은 장소를 가리킨다.
 CACHE_MISS_STEP = 0.00001
 
@@ -91,17 +112,31 @@ def measure_analyze(
     return {"status": status, "client_ms": round(elapsed, 1), "best_fid": best_fid}
 
 
+# 그릴 수 있는 선의 최소 조건. 점 하나로는 경로를 표시할 수 없다.
+MIN_GEOMETRY_POINTS = 2
+
+
 def measure_route(
     base_url: str, lon: float, lat: float, fid: int, timeout_s: float
 ) -> dict[str, Any]:
+    """경로 한 번. **200이어도 그릴 선이 없으면 성공이 아니다.**"""
     query = urllib.parse.urlencode(
         {"lon": f"{lon:.5f}", "lat": f"{lat:.5f}", "fid": str(fid)}
     )
     body, elapsed, status = _get(f"{base_url.rstrip('/')}/api/route?{query}", timeout_s)
     points = 0
     if status == 200 and isinstance(body, dict):
-        points = len(body.get("geometry", {}).get("coordinates", []))
-    return {"status": status, "client_ms": round(elapsed, 1), "geometry_points": points}
+        geometry = body.get("geometry")
+        coordinates = (
+            geometry.get("coordinates") if isinstance(geometry, dict) else None
+        )
+        points = len(coordinates) if isinstance(coordinates, list) else 0
+    return {
+        "status": status,
+        "client_ms": round(elapsed, 1),
+        "geometry_points": points,
+        "ok": status == 200 and points >= MIN_GEOMETRY_POINTS,
+    }
 
 
 def server_durations(host: str, since: str) -> dict[str, list[float]]:
@@ -195,6 +230,25 @@ def main(argv: list[str] | None = None) -> int:
             )
         flow_ms = (time.perf_counter() - flow_started) * 1000.0
 
+        # **세 단계가 모두 성공해야 그 회차가 흐름을 잰 것이다.**
+        #
+        # 경로를 부를 fid가 없었던 회차(`route is None`)도 실패다. 그 라운드는
+        # "검색 → 분석 → 경로 표시"를 밟지 못했고, 조용히 건너뛰면 재지 못한 것을
+        # 잰 것처럼 보고하게 된다.
+        problems: list[str] = []
+        if search["status"] != 200:
+            problems.append(f"search {search['status']}")
+        if analyze["status"] != 200:
+            problems.append(f"analyze {analyze['status']}")
+        if route is None:
+            problems.append("route 미호출(경로를 그릴 시설이 분석에 없다)")
+        elif not route["ok"]:
+            problems.append(
+                f"route {route['status']}"
+                if route["status"] != 200
+                else f"route 200이지만 geometry 점 {route['geometry_points']}개"
+            )
+
         rounds.append(
             {
                 "round": index + 1,
@@ -203,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
                 "route": route,
                 # 검색 → 분석 → 경로 표시까지의 **전체 흐름**. 10절이 요구하는 항목이다.
                 "flow_client_ms": round(flow_ms, 1),
+                "complete": not problems,
+                "problems": problems,
             }
         )
         print(
@@ -210,8 +266,12 @@ def main(argv: list[str] | None = None) -> int:
             f"analyze {analyze['status']} {analyze['client_ms']}ms · "
             f"route {route['status'] if route else '-'} "
             f"{route['client_ms'] if route else '-'}ms · flow {round(flow_ms, 1)}ms"
+            + (f"  << 실패: {', '.join(problems)}" if problems else "")
         )
 
+    # 단계별 통계는 **그 단계가 성공한 회차**만, 흐름 통계는 **세 단계가 모두 성공한
+    # 회차**만 담는다. 실패한 회차를 섞으면 502가 빨리 오는 만큼 중앙값이 짧아진다.
+    complete = [r for r in rounds if r["complete"]]
     client = {
         "search": summarise(
             [r["search"]["client_ms"] for r in rounds if r["search"]["status"] == 200]
@@ -220,13 +280,9 @@ def main(argv: list[str] | None = None) -> int:
             [r["analyze"]["client_ms"] for r in rounds if r["analyze"]["status"] == 200]
         ),
         "route": summarise(
-            [
-                r["route"]["client_ms"]
-                for r in rounds
-                if r["route"] and r["route"]["status"] == 200
-            ]
+            [r["route"]["client_ms"] for r in rounds if r["route"] and r["route"]["ok"]]
         ),
-        "flow": summarise([r["flow_client_ms"] for r in rounds]),
+        "flow": summarise([r["flow_client_ms"] for r in complete]),
     }
 
     server = {}
@@ -241,8 +297,26 @@ def main(argv: list[str] | None = None) -> int:
         "location": args.location,
         "network": args.network,
         "rounds": len(rounds),
+        # 세 단계가 모두 성공한 회차. `flow` 통계가 담고 있는 것이 이것뿐이다.
+        "rounds_complete": len(complete),
         "client_perceived_ms": client,
         "server_internal_ms": server or "미수집 (--host를 주면 읽는다)",
+        # **무엇을 잰 값인지 보고서 안에 적어 둔다.** 이것이 없으면 나중에 읽는 사람이
+        # 화면에 경로가 그려지기까지의 시간으로 오해한다(Astra finding 8).
+        "measures": (
+            "HTTP 단계 세 번(search → analyze → route)의 클라이언트 왕복 시간. "
+            "검색 결과 선택 후 **화면에 경로가 그려질 때까지**의 시간이 아니다 — "
+            "SDK 로드·번들 파싱·타일 수신·렌더는 여기 없다."
+        ),
+        "gate_2": (
+            "이 도구는 숫자를 기록할 뿐 게이트 2 통과를 판정하지 않는다. "
+            "기준 대조와 판정은 PROJECT.md의 게이트 기록에 사람이 적는다."
+        ),
+        "failed_rounds": [
+            {"round": r["round"], "problems": r["problems"]}
+            for r in rounds
+            if not r["complete"]
+        ],
         "note": (
             "클라이언트 체감에는 해외 리전(Los Angeles) 왕복이 포함된다. "
             "서버 내부 처리 시간은 포함하지 않는다."
@@ -251,14 +325,22 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
+    # 검사가 판정을 들여다볼 수 있게 마지막 보고서를 남긴다. 파일로 쓰지는 않는다.
+    global LAST_REPORT
+    LAST_REPORT = report
+
     failures = [
-        f"round {r['round']} {name}"
+        f"round {r['round']}: {', '.join(r['problems'])}"
         for r in rounds
-        for name in ("search", "analyze")
-        if r[name]["status"] != 200
+        if not r["complete"]
     ]
     if failures:
-        print(f"\n실패한 요청이 있다: {', '.join(failures)}", file=sys.stderr)
+        print(
+            "\n흐름을 끝까지 재지 못한 회차가 있다 (게이트 2 통과로 읽지 마라):",
+            file=sys.stderr,
+        )
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
         return 1
     return 0
 
