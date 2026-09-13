@@ -1,6 +1,6 @@
 # 현재 상태 (STATUS.md)
 
-갱신: 2026-09-13 (PR #18 Astra 독립감사 remediation). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
+갱신: 2026-09-13 (PR #18 Fable delta QA 3건 remediation). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
 
 **이 파일은 현재 상태와 역사 기록을 함께 담는다.** 아래 "지금 동작하는 것"과 "현재
 작업과 다음 행동"이 현재이고, 날짜가 붙은 절(`## … (2026-09-12, …)` 등)은 **그때의
@@ -21,8 +21,19 @@
 
 ## 현재 작업과 다음 행동
 
-- **현재 작업: PR #18의 Astra 독립감사 finding 1~11 remediation (2026-09-13, Opus 5).**
-  - 브랜치 `feat/week3-search-route-web`, base `origin/main` `9212bcf`. **작업 트리에 미커밋 변경이 없다.** Astra가 검토한 HEAD는 `9d7e04d`이고 그 위에 remediation 커밋을 쌓았다.
+- **현재 작업: PR #18의 Fable delta QA 3건 remediation (2026-09-13, Opus 5).** frontend(`web/**`)만 바뀌었고 api·data·deploy는 손대지 않았다.
+  - Fable 5.1이 Astra remediation 뒤의 HEAD `abe9961`을 실제 카카오·브라우저에서 사용자-visible delta QA해 3건을 남겼다. 셋 다 닫았다.
+  - ① **배치 전환 직후 지도가 이전 배치의 시트 높이로 프레이밍됐다.** 390×844 → 1280×800에서 핀 y≈191·경로 bbox 107~277(1280 직접 진입은 y≈400·229~571). `centerOn`·`setRoute`가 쓰는 inset이 배치가 바뀐 커밋에서 이전 값이었고, inset을 0으로 되돌리는 effect가 프레이밍 effect **뒤에** 선언돼 있었다. inset에 "어느 배치에서 쟀는지"를 함께 들고 어긋나면 프레이밍을 미룬다(`MapPage.tsx`).
+  - ② **포커스 링이 상자에 잘렸다.** 담기·공유 윗변 5px(스크롤 상자), top3 항목 오른변 3px·첫 항목 윗변 3px(`overflow: hidden` 접힘 상자). 두께 2px·대비 6.8:1은 정상이었다 — 잘린 이유는 자리다. 담기·공유는 44px 탭 상자를 상자 안으로 들여놓고 링을 안쪽에 그리며(아이콘 위치는 **픽셀 단위로 불변**, A/B 측정으로 확인), top3는 자르는 상자만 좌우 8px 넓혀 내용을 움직이지 않았다.
+  - ③ **모바일에서 카카오 저작권이 시트에 가렸다.** 390에서 저작권 y≈825, peek 시트 상단 712·half 405. 공식 API는 `setCopyrightPosition`의 `BOTTOMLEFT`/`BOTTOMRIGHT`뿐이라 **세로를 고를 수 없음**을 실제 SDK 프로브로 확인했다. 지도 host를 줄이는 방법은 스냅마다 지도 내용이 따라 움직여 확정 동작을 깨므로, SDK가 아래 끝에 붙여 둔 저작권·축척 막대의 `bottom` 한 값만 시트 위로 올렸다. **크기(32×10)·문구·이미지·내부 DOM은 건드리지 않았고 지우거나 가리지도 않는다.**
+  - 회귀: cold entry 데스크톱 vs 전환 후 데스크톱의 중심·경로 fit 대조와 저작권 막대 위치 검사를 vitest에 넣었고(가짜 SDK가 실제 SDK와 같은 모양으로 저작권 막대를 만든다), 두 검사 모두 **고치기 전 코드에서 실패하는 것을 확인했다.** 브라우저 QA에는 링 사각형 대 자르는 상자 교집합 판정을 넣고(`qa-focus.mjs`의 `ringClipping`, CI의 `check:qa`가 Fable 측정값을 반례로 검사), 링을 상자 밖으로 미는 대조군으로 판정이 살아 있는지 확인한다.
+  - **브라우저 QA의 대조군 스타일이 지워지지 않던 것도 고쳤다.** `page.addStyleTag`는 `id`를 받지 않아 `getElementById`로 지울 수 없었고, 그 뒤의 포커스 측정이 전부 투명한 링을 보고 있었다.
+  - 검사: `tsc -b` ✓ · `vitest run` 15 files / **126 tests** ✓ · `check:boundaries` ✓ · `build` ✓ · `check:bundle` ✓ · `check:qa` ✓ · `qa:browser`(모의 API, 7 뷰포트) **358건 실패 0**. **실제 카카오 SDK**(실제 타일·실제 SDK가 만든 저작권 DOM) + 모의 API로 왕복·저작권 검사 **49건 실패 0**. `qa:kakao` 전체(실데이터·실제 OSRM 필요)는 이번에 돌리지 않았다.
+  - **남긴 잔여(결함으로 닫지 않음):** 320×568 half에서 top3 셋째 항목이 화면 아래 끝에 걸쳐 링 바깥 4px이 화면 밖이다. 자르는 상자가 가까워서가 아니라 **접힘 아래로 넘어간 콘텐츠**이고(같은 항목이 full 스냅에서는 통과) 시트를 올리면 보인다. 브라우저 QA가 NOTE로 남긴다.
+  - **PR #18은 Draft 그대로다. 병합·배포하지 않았다. 새 HEAD는 Fable 재-QA도 독립 기술 검토도 받지 않았다.**
+
+- **직전 작업: PR #18의 Astra 독립감사 finding 1~11 remediation (2026-09-13, Opus 5).**
+  - 브랜치 `feat/week3-search-route-web`, base `origin/main` `9212bcf`. Astra가 검토한 HEAD는 `9d7e04d`이고 그 위에 remediation 커밋을 쌓았다.
   - 고친 것: 검색 명칭·주소가 history.state에 남던 것(1) · 960px 왕복에서 지도 소실(2) · 인코딩된 `/p` 경로의 좌표 로그 유출(3) · 웹 릴리스 디렉터리 가변성(4) · 불완전 `/table` 응답과 밀도 추가 배치의 canonical snap(5) · 스키마 어긋난 카카오 응답을 빈 결과로 숨김(6) · 깨진 `/p` URL이 앱을 비움(7) · measure_flow가 경로 실패를 통과로 셈(8) · 배포 전환 중 직전 자산 404(9) · 브라우저 QA의 44px·focus false-green(10) · 기준 문서·STATUS의 낡은 문장(11).
   - **PR #18은 Draft 그대로이고 병합·배포하지 않았다.** Astra 리뷰는 `9d7e04d` 기준이므로 **새 HEAD는 아직 독립 승인을 받지 않았다.**
   - 아래 "Week 3 프론트 인계 기록"과 "Week 3 engineering 검증"은 **2026-09-12 시점의 기록**이다. 그 안의 "미커밋", HEAD `9079145`, "다음 작업" 같은 문장은 그때의 상태이며 지금은 해당하지 않는다.
