@@ -20,8 +20,8 @@ import pytest
 from app.adapters.osrm import OsrmClient
 from app.analysis.coords import haversine_m
 from app.analysis.models import Candidate, Snap
+from app.analysis.snap import same_snap_point
 from app.contract import MAX_TABLE_DESTINATIONS
-from app.service import same_snap_point
 
 pytestmark = pytest.mark.real_osrm
 
@@ -128,6 +128,13 @@ def test_real_table_returns_destination_snap_points(osrm: OsrmClient):
 
 def test_real_nearest_and_table_can_disagree_on_the_origin(osrm: OsrmClient):
     """**`/nearest`의 스냅과 `/table`의 출발지 스냅은 같지 않을 수 있다.**
+
+    2026-09-13 스모크 5좌표 재측정(2026Q3-cc-01): 두 곳에서 어긋났다.
+      gongju-knu-gate            /nearest → /table  24.8m
+      sejong-government-complex  /nearest → /table  63.9m
+      나머지 세 곳은 같은 지점.
+    이것이 finding 5-A가 가리키는 위험의 크기다 — `/table`을 부르고도 출발지를 모른 채
+    `/nearest`로 물러서면 응답의 좌표와 시간이 그만큼 떨어진 두 점의 것이 된다.
 
     v2.4 4-3 10단계 본문은 보존 대상을 "3단계 `/nearest`의 출발지 스냅"이라고 적었지만,
     같은 단계의 확인 조항은 "`/table`이 고른 지점"을 기준으로 삼는다. 실제 OSRM에서는
@@ -236,3 +243,90 @@ def test_real_snap_distance_recomputation_matches_osrm_closely(osrm: OsrmClient)
     assert theirs > 0.0, "이 좌표는 스냅이 움직여야 비교가 의미를 가진다"
     # 0.5% 안. 실측 38.81m vs 38.87m (차이 0.05m).
     assert abs(ours - theirs) <= max(0.5, theirs * 0.005)
+
+
+# --- 추가 밀도 배치의 출발지 (2026-09-13, Astra finding 5-B) --------------------
+
+
+def _candidates(count: int, start: int = 1) -> list[Candidate]:
+    return [
+        Candidate(fid=start + i, name=f"p{start + i}", category="food_cafe", straight_m=100.0)
+        for i in range(count)
+    ]
+
+
+def test_real_table_source_can_depend_on_the_destination_set(osrm: OsrmClient):
+    """**같은 출발 좌표라도 목적지 집합이 다르면 `/table`이 다른 지점에서 출발할 수 있다.**
+
+    이것이 finding 5-B의 전제다. 밀도 추가 배치는 목적지 집합이 매번 다르므로, 배치마다
+    돌아온 `sources[0]`을 버리면 **다른 지점에서 잰 도보시간이 같은 10분 집계에 섞인다.**
+
+    **2026-09-13 측정 결과: 이 그래프(2026Q3-cc-01)에서는 재현되지 않았다.**
+    출발 좌표를 고정하고 목적지 반경을 200·600·1200·2500·4000m로 바꿔 여섯 곳에서
+    시도했지만 `sources[0]`은 모두 같았다. 그래서 이 검사는 지금 skip된다.
+
+    그래도 배치마다 출발지를 확인하는 쪽으로 고친 이유는 두 가지다. 첫째, `/table`이
+    어느 phantom node를 고르는지는 **OSRM이 정하는 것이고 우리가 계약한 것이 아니다** —
+    그래프 판본이 바뀌면 달라질 수 있다. 둘째, 확인 비용이 응답 한 필드를 비교하는
+    것뿐이라 틀렸을 때의 손해(다른 지점에서 잰 값이 10분 집계에 섞임)와 견줄 것이 아니다.
+    예전 코드는 그 필드를 **버려서** 어긋나도 알 수 없었다.
+    """
+    origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert origin is not None
+
+    near = _ring(6, radius_m=300.0)
+    far = _ring(6, radius_m=2500.0)
+    first = osrm.table(origin, _candidates(6), near)
+    second = osrm.table(origin, _candidates(6, start=100), far)
+    assert first.source is not None and second.source is not None
+
+    if same_snap_point(first.source, second.source):
+        pytest.skip("이 그래프에서는 목적지 집합이 달라도 출발지가 같다 — 차이를 보일 수 없다")
+    assert not same_snap_point(first.source, second.source)
+
+
+def test_real_second_batch_from_the_canonical_source_lands_on_the_same_point(
+    osrm: OsrmClient,
+):
+    """**고친 방식이 실제 OSRM에서 실제로 통한다.**
+
+    첫 배치는 예비 스냅(`/nearest`)에서 출발하고, 그 응답의 `sources[0]`이 권위 있는
+    지점이 된다. 추가 배치를 **그 지점에서** 부르면 OSRM이 같은 phantom node를 고른다.
+    목적지 집합을 일부러 크게 바꿔도 그렇다 — 그것이 앞 검사가 보여 준 위험이다.
+
+    여유는 `/route` 확인과 같은 한 눈금(1e-6도)이다. 넓히면 확인이 공허해진다.
+    """
+    preliminary = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert preliminary is not None
+
+    first = osrm.table(preliminary, _candidates(8), _ring(8, radius_m=400.0))
+    canonical = first.source
+    assert canonical is not None, "/table 응답에 sources[0]이 있어야 한다"
+
+    # 추가 배치들: 목적지 집합을 매번 다르게 둔다.
+    for index, radius in enumerate((900.0, 1800.0, 2600.0), start=1):
+        batch = osrm.table(canonical, _candidates(8, start=200 * index), _ring(8, radius_m=radius))
+        assert batch.source is not None, f"추가 배치 {index} 응답에 sources[0]이 없다"
+        assert same_snap_point(batch.source, canonical), (
+            f"추가 배치 {index}(반경 {radius}m)가 다른 지점에서 출발했다: "
+            f"{batch.source.lon},{batch.source.lat} != {canonical.lon},{canonical.lat}"
+        )
+
+
+def test_real_analysis_snap_distance_is_measured_from_the_input(osrm: OsrmClient):
+    """응답 `snapped`와 `snap_distance_m`이 **같은 두 점**을 가리킨다 (2026-09-12 확정 ⓑ).
+
+    `/table`의 `sources[0].distance`는 **우리가 보낸 좌표**(= `/nearest` 스냅)에서 잰
+    값이라 원 입력 기준이 아니다. 그것을 그대로 실으면 좌표는 `/table`의 것인데 거리는
+    다른 구간의 것이 된다. 실제 그래프에서 두 값이 얼마나 다른지 여기서 확인한다.
+    """
+    preliminary = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
+    assert preliminary is not None
+    response = osrm.table(preliminary, _candidates(8), _ring(8, radius_m=600.0))
+    assert response.source is not None
+
+    measured = haversine_m(ORIGIN_LON, ORIGIN_LAT, response.source.lon, response.source.lat)
+    # 이것이 응답에 실리는 값이다(core._canonical_snap).
+    assert measured >= 0.0
+    # 상류가 준 숫자는 다른 구간의 것이다. 같을 수도 있지만 **같다고 가정하지 않는다.**
+    assert isinstance(response.source.snap_distance_m, float)

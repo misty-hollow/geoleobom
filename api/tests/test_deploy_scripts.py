@@ -307,7 +307,7 @@ def test_web_deploy_never_deletes_an_existing_release(deploy_web: str, web_relea
     곳이 사라졌다.
     """
     for source, name in ((deploy_web, "deploy_web.sh"), (web_release, "web_release.sh")):
-        assert "rm -rf \"$root/$release\"" not in source, name
+        assert 'rm -rf "$root/$release"' not in source, name
         assert "rm -rf '$COMMIT_SHA'" not in source, name
         assert 'rm -rf "$COMMIT_SHA"' not in source, name
 

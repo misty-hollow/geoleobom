@@ -40,7 +40,9 @@ ANALYZE_BODY = {
         {"category": "convenience", "status": "ok", "best": {"fid": 1234, "walk_seconds": 240}}
     ]
 }
-ROUTE_BODY = {"geometry": {"type": "LineString", "coordinates": [[127.14, 36.47], [127.141, 36.47]]}}
+ROUTE_BODY = {
+    "geometry": {"type": "LineString", "coordinates": [[127.14, 36.47], [127.141, 36.47]]}
+}
 
 
 def _responder(monkeypatch, module, *, route_status: int = 200, route_body: Any = ROUTE_BODY):
@@ -111,7 +113,11 @@ def test_a_flow_without_a_routable_facility_is_not_a_pass(measure_flow, monkeypa
         if "/api/search" in url:
             return [], 12.0, 200
         if "/api/analyze" in url:
-            return {"nearest": [{"category": "convenience", "status": "none", "best": None}]}, 34.0, 200
+            return (
+                {"nearest": [{"category": "convenience", "status": "none", "best": None}]},
+                34.0,
+                200,
+            )
         raise AssertionError(f"경로를 부를 fid가 없는데 호출했다: {url}")
 
     monkeypatch.setattr(measure_flow, "_get", fake_get)

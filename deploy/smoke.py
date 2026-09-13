@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 import time
@@ -112,6 +113,26 @@ def _check_facility(category: str, label: str, facility: dict[str, Any]) -> list
     return problems
 
 
+EARTH_RADIUS_M = (
+    6_371_008.8  # IUGG 평균 반지름. api/app/analysis/coords.py와 같은 값이다.
+)
+# 좌표 5자리(약 1m)와 부동소수점 왕복을 감안한 여유. 이보다 크게 어긋나면 좌표와 거리가
+# 서로 다른 두 점을 가리키고 있는 것이다.
+SNAP_DISTANCE_TOLERANCE_M = 1.0
+
+
+def haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    """두 좌표 사이 대권거리(m). 서버 구현과 같은 식이다 — 여기서 **독립적으로** 다시 잰다."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = phi2 - phi1
+    dlambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
+    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
 def check_contract(
     body: dict[str, Any], *, requested: tuple[float, float] | None = None
 ) -> list[str]:
@@ -165,6 +186,30 @@ def check_contract(
             snapped.get(key), bool
         ):
             problems.append(f"snapped.{key}가 수가 아니다: {snapped.get(key)!r}")
+    # **`snap_distance_m`은 `input`에서 `snapped`까지의 거리다** (2026-09-12 확정 ⓑ).
+    #
+    # 데이터 판본과 무관하게 성립하는 의미 불변식이라 기준값 파일 없이도 검사할 수 있다.
+    # 어긋나면 좌표는 한 지점의 것인데 거리는 다른 구간의 것 — 서로 다른 스냅이 섞인
+    # 응답이다. 상류가 준 숫자를 그대로 실으면 정확히 그렇게 된다.
+    if all(
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        for value in (
+            coord.get("lon"),
+            coord.get("lat"),
+            snapped.get("lon"),
+            snapped.get("lat"),
+            snapped.get("snap_distance_m"),
+        )
+    ):
+        measured = haversine_m(
+            coord["lon"], coord["lat"], snapped["lon"], snapped["lat"]
+        )
+        if abs(measured - snapped["snap_distance_m"]) > SNAP_DISTANCE_TOLERANCE_M:
+            problems.append(
+                f"snap_distance_m({snapped['snap_distance_m']:.2f}m)이 input→snapped "
+                f"실측({measured:.2f}m)과 다르다 — 좌표와 거리가 다른 두 점을 가리킨다"
+            )
+
     warnings = body["warnings"]
     if not isinstance(warnings, list) or not all(isinstance(w, str) for w in warnings):
         problems.append(f"warnings가 문자열 배열이 아니다: {warnings!r}")
@@ -331,6 +376,78 @@ def check_contract(
             elif parsed.utcoffset() != timedelta(0):
                 problems.append(f"computed_at이 UTC가 아니다: {computed_at!r} (4-4)")
 
+    return problems
+
+
+# `/route`가 분석과 같은 지점에서 출발했는지 볼 때 쓰는 여유. OSRM은 좌표를 1e-6도
+# 고정소수점으로 들고 있으므로 **그 눈금 단위 정수로** 비교한다(api/app/contract.py와
+# 같은 기준). 도(度) 실수로 빼면 한 눈금 차이가 이진 표현 오차 때문에 1e-6보다 커진다.
+OSRM_COORD_SCALE = 1_000_000
+ROUTE_SNAP_EPSILON_TICKS = 1
+
+
+def _ticks(degrees: float) -> int:
+    return round(degrees * OSRM_COORD_SCALE)
+
+
+def check_route_uses_the_same_snap(
+    base_url: str, body: dict[str, Any], lon: float, lat: float, timeout_s: float
+) -> list[str]:
+    """`/route`의 출발지가 분석의 `snapped`와 **같은 지점**인지 (v2.4 4-3 10단계).
+
+    데이터 판본과 무관한 의미 불변식이라 기준값 파일 없이 성립해야 한다. 기준값은
+    "이번 데이터에서 이런 값이 나왔다"를 기록할 뿐이고, 이 검사는 **어떤 데이터에서도
+    깨지면 안 되는 것**을 본다. 그래서 옛 롤백 산출물의 기준값과 부딪히지 않는다.
+
+    경로를 그릴 시설이 하나도 없으면(모두 unreachable·none) 조용히 건너뛴다 — 그것은
+    이 불변식의 위반이 아니다.
+    """
+    problems: list[str] = []
+    fid = None
+    for item in body.get("nearest", []):
+        if item.get("status") == "ok" and item.get("best"):
+            fid = item["best"]["fid"]
+            break
+    if fid is None:
+        return problems
+
+    query = urllib.parse.urlencode(
+        {"lon": f"{lon:.5f}", "lat": f"{lat:.5f}", "fid": str(fid)}
+    )
+    url = f"{base_url.rstrip('/')}/api/route?{query}"
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            route = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        exc.read()
+        return [f"/route가 HTTP {exc.code} (분석이 실은 fid {fid}인데 경로가 없다)"]
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return [f"/route 요청 실패 {exc}"]
+
+    origin = route.get("snapped_origin") or {}
+    snapped = body["snapped"]
+    for key in ("lon", "lat"):
+        if not isinstance(origin.get(key), (int, float)):
+            problems.append(f"/route 응답에 snapped_origin.{key}가 없다")
+    if problems:
+        return problems
+    if (
+        abs(_ticks(origin["lon"]) - _ticks(snapped["lon"])) > ROUTE_SNAP_EPSILON_TICKS
+        or abs(_ticks(origin["lat"]) - _ticks(snapped["lat"]))
+        > ROUTE_SNAP_EPSILON_TICKS
+    ):
+        problems.append(
+            "/route의 출발지가 분석의 snapped와 다른 지점이다 "
+            f"(analyze {snapped['lon']},{snapped['lat']} vs route {origin['lon']},{origin['lat']}) "
+            "— 4-3 10단계"
+        )
+
+    # 같은 배포 세대에서 나온 값이어야 한다(4-4). 여기서 갈리면 화면이 stale로 간다.
+    if route.get("versions") != body.get("versions"):
+        problems.append(
+            f"/route versions가 분석과 다르다: {route.get('versions')} != {body.get('versions')}"
+        )
     return problems
 
 
@@ -606,6 +723,18 @@ def main(argv: list[str] | None = None) -> int:
             requested=(round(float(coord["lon"]), 5), round(float(coord["lat"]), 5)),
         )
         failures.extend(f"{spot}: {problem}" for problem in problems)
+
+        # 데이터 판본과 무관한 의미 불변식. 기준값 파일 없이도 성립해야 한다.
+        failures.extend(
+            f"{spot}: {problem}"
+            for problem in check_route_uses_the_same_snap(
+                args.base_url,
+                body,
+                float(coord["lon"]),
+                float(coord["lat"]),
+                args.timeout,
+            )
+        )
 
         if len(computed_at_seen) > 1 and len(set(computed_at_seen)) != 1:
             # 4-4: 캐시 히트는 원 계산 결과의 computed_at을 그대로 돌려준다. 값이
