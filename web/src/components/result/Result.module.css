@@ -598,14 +598,18 @@
  * 지도 목적지 마커와 **같은 형태**의 12px 링 — "링 = 이 시설"(DESIGN.md 7-1 패널 연결 기호).
  * 마커는 SVG 데이터 URI라 값을 공유할 수 없으므로 같은 토큰으로 다시 그린다.
  */
+/*
+ * 목적지 마커와 **같은 시각 언어**를 12px로 옮긴 것이다(DESIGN.md 7-1 패널 연결 기호):
+ * 흰 채움 · accent 링 · 가운데 accent 점. 마커가 16에 링 2.5·점 5이므로 같은 비율로
+ * 12에 링 2·점 4다. `box-sizing: border-box`(base.css)라 테두리를 포함해 12px이다.
+ */
 .routeRing {
   flex: 0 0 auto;
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--paper);
   border: 2px solid var(--accent-600);
-  box-shadow: inset 0 0 0 1.5px var(--paper);
+  background: radial-gradient(circle at center, var(--accent-600) 0 2px, var(--paper) 2px);
 }
 
 /* 내용 교체는 `--dur-fade` 120 opacity. 시트 스냅(240)과 독립이다(DESIGN.md 11절). */

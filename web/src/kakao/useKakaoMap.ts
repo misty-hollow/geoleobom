@@ -64,6 +64,10 @@ const DEFAULT_LEVEL = 4
 const ACCENT = '#1F4FD0'
 const PAPER = '#FFFFFF'
 
+/** 목적지 링의 선 두께와 중앙 점 지름 (DESIGN.md 7-1). 링 전체 지름은 `RING`(16)이다. */
+const DEST_RING_STROKE = 2.5
+const DEST_DOT = 5
+
 export type MapStatus = 'disabled' | 'loading' | 'ready' | 'error'
 export type PinKind = 'pending' | 'fixed'
 
@@ -260,10 +264,23 @@ function pinImageSource(kind: PinKind): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
+/**
+ * 목적지 링 (DESIGN.md 7-1 결정 9): **전체 16 · `--paper` 채움 · `--accent-600` 링 2.5 ·
+ * 중앙 accent 점 5 · 중앙 anchor.**
+ *
+ * 채움과 선의 색이 출발 핀과 **반대**다 — 흰 바탕에 accent 테두리이고, 가운데만 accent로
+ * 채운다. 12px 점은 케이싱 9px 선 끝과 구분되지 않아 폐기된 모양이다(7-1).
+ *
+ * stroke는 경로의 **양쪽으로** 절반씩 자라므로 바깥지름이 16이 되려면 반지름은
+ * `8 − 2.5/2 = 6.75`다. 반지름을 8로 두면 링이 상자 밖으로 잘린다.
+ */
 function destinationImageSource(): string {
+  const ringRadius = 8 - DEST_RING_STROKE / 2
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">` +
-    `<circle cx="8" cy="8" r="6" fill="${ACCENT}" stroke="${PAPER}" stroke-width="2"/></svg>`
+    `<circle cx="8" cy="8" r="${ringRadius}" fill="${PAPER}" stroke="${ACCENT}" ` +
+    `stroke-width="${DEST_RING_STROKE}"/>` +
+    `<circle cx="8" cy="8" r="${DEST_DOT / 2}" fill="${ACCENT}"/></svg>`
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 

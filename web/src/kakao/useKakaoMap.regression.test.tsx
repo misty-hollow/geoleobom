@@ -16,6 +16,10 @@ import { normalize, type LonLatPair } from '../coords'
 import { installFakeKakao, uninstallFakeKakao, type FakeKakao } from '../test/fakeKakao'
 import { resetKakaoSdkForTests, useKakaoMap } from './useKakaoMap'
 
+/** DESIGN.md 3절 `--accent-600`·`--paper`. 마커 SVG는 CSS 변수를 읽지 못해 값이 박혀 있다. */
+const ACCENT = '#1F4FD0'
+const PAPER = '#FFFFFF'
+
 const A = normalize(127.1402, 36.4713)!
 
 async function flush() {
@@ -335,6 +339,46 @@ describe('useKakaoMap 회귀', () => {
       expect(ring.zIndex).toBeLessThan(pin.zIndex!)
       // 지도 위 텍스트 라벨은 없다. 시설명은 링의 title로만 남는다(7-1).
       expect(ring.title).toBe('마트·슈퍼 · 하나로마트 신관점')
+    })
+
+    /**
+     * DESIGN.md 7-1 결정 9: 목적지는 **전체 16 · `--paper` 채움 · `--accent-600` 링 2.5 ·
+     * 중앙 accent 점 5 · 중앙 anchor**다.
+     *
+     * "16px 마커가 만들어졌다"만 보면 이 규칙이 통째로 뒤집혀도 통과한다 — 실제로 채움과
+     * 선의 색이 뒤바뀐 예전 모양(accent 채움 + 흰 선 2, 중앙 점 없음)이 그렇게 살아남았다.
+     * 그래서 마커 이미지의 **SVG를 풀어 도형을 직접 본다.**
+     */
+    it('목적지 링은 흰 채움 + accent 2.5 링 + 중앙 accent 점 5이고 중앙 anchor다 (DESIGN.md 7-1)', async () => {
+      const { map } = await mounted()
+      act(() => map.setRoute({ line: NEAR, origin: ORIGIN }, { bottomInset: 0, frame: 'fit' }))
+      const ring = fake.markers.find((marker) => !marker.draggable)!
+      const image = ring.image as { src: string; size: { width: number; height: number }; options: { offset: { x: number; y: number } } }
+
+      // 전체 16 · 중앙 anchor.
+      expect([image.size.width, image.size.height]).toEqual([16, 16])
+      expect([image.options.offset.x, image.options.offset.y]).toEqual([8, 8])
+
+      const svg = decodeURIComponent(image.src.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''))
+      expect(svg).toContain('width="16" height="16"')
+
+      const circles = [...svg.matchAll(/<circle[^>]*\/>/g)].map((match) => match[0])
+      expect(circles, '링과 중앙 점 두 도형이어야 한다').toHaveLength(2)
+      const [outer, dot] = circles
+
+      // 바깥: 흰 채움 + accent 링 2.5. **색이 뒤바뀌면 여기서 깨진다.**
+      expect(outer).toContain(`fill="${PAPER}"`)
+      expect(outer).toContain(`stroke="${ACCENT}"`)
+      expect(outer).toContain('stroke-width="2.5"')
+      // stroke는 양쪽으로 절반씩 자란다. 바깥지름 16 → 반지름 8 − 1.25.
+      expect(outer).toContain('r="6.75"')
+
+      // 안: accent 점 지름 5(반지름 2.5). 점이 없으면(예전 모양) 여기서 깨진다.
+      expect(dot).toContain(`fill="${ACCENT}"`)
+      expect(dot).toContain('r="2.5"')
+      expect(dot).not.toContain('stroke')
+      for (const circle of circles) expect(circle).toContain('cx="8"')
+      for (const circle of circles) expect(circle).toContain('cy="8"')
     })
 
     it('resetUserMoved()는 사용자 이동 표시를 끈다(× ·같은 행 재탭)', async () => {
