@@ -5,6 +5,25 @@
  * 불리지 않는다"는 이 기록으로만 판정할 수 있다.
  *
  * tsconfig의 `erasableSyntaxOnly` 때문에 매개변수 프로퍼티를 쓰지 않는다.
+ *
+ * ## 투영은 **실제로 계산한다** (Week 4 경로 fit)
+ *
+ * DESIGN.md 7-2의 fit 상태 머신은 "지금 배율에서 경로가 화면에 들어오는가"로 갈린다.
+ * 좌표를 화면 픽셀로 옮기는 투영이 중심·배율과 무관한 고정 함수였을 때는 그 판정을
+ * 검사할 수 없었다 — 어떤 팬·줌에도 같은 픽셀이 나오므로 "들어온다/안 들어온다"가
+ * 언제나 같은 답이었다.
+ *
+ * 그래서 이 가짜는 **뷰포트 크기·중심·배율을 가진 지도**를 흉내 낸다.
+ *
+ *   - 배율 한 단계당 축척 2배: `degPerPx(level) = 1e-5 × 2^(level-4)` (카카오처럼
+ *     숫자가 작을수록 확대). 실제 카카오의 축척표와 값이 같지는 않고, **방향과 배수만**
+ *     같다 — 판정이 보는 것이 그 둘이다.
+ *   - `getBounds`·`getProjection`이 그 모델에서 나온다.
+ *   - `setBounds`는 패딩을 뺀 영역에 bbox가 들어가는 배율을 골라 **실제로 중심·배율을
+ *     바꾼다.** 기록만 하면 "fit 뒤에 경로가 화면 안에 있다"를 검사할 수 없다.
+ *
+ * 뷰포트 크기는 `fake.setViewport(width, height)`로 정한다(jsdom은 레이아웃을 하지 않아
+ * 요소 크기가 0이다). 기본값은 390×844다.
  */
 
 export interface FakeLatLng {
@@ -21,6 +40,9 @@ export interface FakeMarker extends FakeTarget {
   map: unknown
   draggable: boolean
   image: unknown
+  /** DESIGN.md 7-1의 z-순서를 검사가 직접 본다. */
+  zIndex: number | null
+  title: string | null
   setPosition(position: FakeLatLng): void
   getPosition(): FakeLatLng
 }
@@ -28,6 +50,8 @@ export interface FakeMarker extends FakeTarget {
 export interface FakePolyline extends FakeTarget {
   map: unknown
   path: FakeLatLng[]
+  zIndex: number | null
+  strokeWeight: number | null
 }
 
 export interface FakeMap extends FakeTarget {
@@ -35,6 +59,15 @@ export interface FakeMap extends FakeTarget {
   level: number
   /** 사용자가 지도를 옮긴 상태를 만든다. 검색이 읽는 "지금 중심"이 이 값이다(v2.5 4-4). */
   setCenter: (latlng: FakeLatLng) => void
+  /** 사용자가 배율을 바꾼 상태를 만든다(DESIGN.md 7-2의 "사용자가 잡아둔 배율"). */
+  setLevel: (level: number) => void
+  getCenter: () => FakeLatLng
+  getLevel: () => number
+  /** 중심·배율·뷰포트에서 나오는 투영. 검사가 "화면 어디에 있나"를 직접 잰다. */
+  getProjection: () => {
+    containerPointFromCoords: (latlng: FakeLatLng) => { x: number; y: number }
+    coordsFromContainerPoint: (point: { x: number; y: number }) => FakeLatLng
+  }
   /** 지도를 만들 때 받은 요소. SDK는 이 요소를 계속 붙들고 산다. */
   container: HTMLElement
   relayoutCount: number
@@ -110,6 +143,9 @@ export interface FakeKakao {
   calls: {
     setCenter: FakeLatLng[]
     setBounds: unknown[][]
+    /** 프로그램 이동(pan). DESIGN.md 7-2 ②의 "들어오는 최소 이동". */
+    panTo: FakeLatLng[]
+    setLevel: number[]
     panBy: [number, number][]
     mapCreated: number
     markerCreated: number
@@ -120,12 +156,23 @@ export interface FakeKakao {
   polylines: FakePolyline[]
   /** `new fake.maps.LatLng(lat, lng)` 대신 쓰는 도우미. */
   latLng: (lat: number, lng: number) => FakeLatLng
+  /** 지도 컨테이너 크기(px). jsdom은 레이아웃을 하지 않으므로 검사가 정해 준다. */
+  setViewport: (width: number, height: number) => void
+  /** 지금 모델이 쓰는 뷰포트. */
+  viewport: { width: number; height: number }
+}
+
+/** 배율 한 단계당 2배. 숫자가 작을수록 확대인 카카오 규약과 방향이 같다. */
+export function fakeDegPerPixel(level: number): number {
+  return 1e-5 * 2 ** (level - 4)
 }
 
 export function createFakeKakao(): FakeKakao {
   const calls: FakeKakao['calls'] = {
     setCenter: [],
     setBounds: [],
+    panTo: [],
+    setLevel: [],
     panBy: [],
     mapCreated: 0,
     markerCreated: 0,
@@ -174,11 +221,25 @@ export function createFakeKakao(): FakeKakao {
     }
   }
   class LatLngBounds {
-    points: LatLng[] = []
-    extend(point: LatLng) {
+    points: FakeLatLng[] = []
+    extend(point: FakeLatLng) {
       this.points.push(point)
     }
+    getSouthWest() {
+      return new LatLng(
+        Math.min(...this.points.map((p) => p.getLat())),
+        Math.min(...this.points.map((p) => p.getLng())),
+      )
+    }
+    getNorthEast() {
+      return new LatLng(
+        Math.max(...this.points.map((p) => p.getLat())),
+        Math.max(...this.points.map((p) => p.getLng())),
+      )
+    }
   }
+
+  const viewport = { width: 390, height: 844 }
 
   const fake: FakeKakao = {
     calls,
@@ -186,6 +247,11 @@ export function createFakeKakao(): FakeKakao {
     markers: [],
     polylines: [],
     latLng: (lat, lng) => new LatLng(lat, lng),
+    viewport,
+    setViewport: (width, height) => {
+      viewport.width = width
+      viewport.height = height
+    },
     maps: {
       LatLng,
       Size,
@@ -237,24 +303,73 @@ export function createFakeKakao(): FakeKakao {
     getCenter() {
       return this.center
     }
+    panTo(latlng: FakeLatLng) {
+      // 실제 SDK는 애니메이션으로 옮긴다. 가짜는 결과 상태만 만든다.
+      this.center = latlng
+      calls.panTo.push(latlng)
+    }
     panBy(dx: number, dy: number) {
       calls.panBy.push([dx, dy])
     }
-    setBounds(...args: unknown[]) {
-      calls.setBounds.push(args)
+    /**
+     * bbox가 **패딩을 뺀 영역**에 들어가는 배율을 고르고 그 영역의 중앙에 놓는다.
+     *
+     * 기록만 하던 예전 가짜로는 "fit 뒤에 경로가 화면 안에 있다"를 검사할 수 없었다.
+     */
+    setBounds(bounds: LatLngBounds, top = 0, right = 0, bottom = 0, left = 0) {
+      calls.setBounds.push([bounds, top, right, bottom, left])
+      if (bounds.points.length === 0) return
+      const sw = bounds.getSouthWest()
+      const ne = bounds.getNorthEast()
+      const availableW = Math.max(1, viewport.width - left - right)
+      const availableH = Math.max(1, viewport.height - top - bottom)
+      const needed = Math.max(
+        (ne.getLng() - sw.getLng()) / availableW,
+        (ne.getLat() - sw.getLat()) / availableH,
+      )
+      // 필요한 축척 이상이 되는 **가장 확대된** 배율. 카카오도 들어가는 선에서 가장 크게 본다.
+      const level =
+        needed <= 0 ? this.level : Math.max(1, Math.ceil(Math.log2(needed / 1e-5) + 4 - 1e-9))
+      this.level = level
+      calls.setLevel.push(level)
+      const degPerPx = fakeDegPerPixel(level)
+      // 패딩을 뺀 영역의 중앙이 bbox 중앙이 되도록 지도 중심을 민다.
+      const offsetX = viewport.width / 2 - (left + availableW / 2)
+      const offsetY = viewport.height / 2 - (top + availableH / 2)
+      this.center = new LatLng(
+        (sw.getLat() + ne.getLat()) / 2 - offsetY * degPerPx,
+        (sw.getLng() + ne.getLng()) / 2 + offsetX * degPerPx,
+      )
+    }
+    getBounds() {
+      const projection = this.getProjection()
+      const bounds = new LatLngBounds()
+      bounds.extend(projection.coordsFromContainerPoint(new Point(0, viewport.height)))
+      bounds.extend(projection.coordsFromContainerPoint(new Point(viewport.width, 0)))
+      return bounds
     }
     getLevel() {
       return this.level
     }
     setLevel(level: number) {
       this.level = level
+      calls.setLevel.push(level)
     }
+    /** 중심·배율·뷰포트에서 나오는 투영. y는 화면처럼 아래로 커진다. */
     getProjection() {
-      // 1px = 0.00001도로 단순화한 투영. 방향만 맞으면 된다(y는 아래로 커진다).
+      const degPerPx = fakeDegPerPixel(this.level)
+      const center = this.center
       return {
-        containerPointFromCoords: (latlng: LatLng) =>
-          new Point(latlng.getLng() * 1e5, -latlng.getLat() * 1e5),
-        coordsFromContainerPoint: (point: Point) => new LatLng(-point.y / 1e5, point.x / 1e5),
+        containerPointFromCoords: (latlng: FakeLatLng) =>
+          new Point(
+            viewport.width / 2 + (latlng.getLng() - center.getLng()) / degPerPx,
+            viewport.height / 2 - (latlng.getLat() - center.getLat()) / degPerPx,
+          ),
+        coordsFromContainerPoint: (point: Point) =>
+          new LatLng(
+            center.getLat() - (point.y - viewport.height / 2) * degPerPx,
+            center.getLng() + (point.x - viewport.width / 2) * degPerPx,
+          ),
       }
     }
     relayout() {
@@ -264,15 +379,26 @@ export function createFakeKakao(): FakeKakao {
 
   class Marker implements FakeMarker {
     listeners: Record<string, ((event: unknown) => void)[]> = {}
-    position: LatLng
+    position: FakeLatLng
     map: unknown
     draggable: boolean
     image: unknown
-    constructor(options: { position: LatLng; map?: unknown; image?: unknown; draggable?: boolean }) {
+    zIndex: number | null
+    title: string | null
+    constructor(options: {
+      position: FakeLatLng
+      map?: unknown
+      image?: unknown
+      draggable?: boolean
+      zIndex?: number
+      title?: string
+    }) {
       this.position = options.position
       this.map = options.map ?? null
       this.image = options.image
       this.draggable = options.draggable ?? false
+      this.zIndex = options.zIndex ?? null
+      this.title = options.title ?? null
       calls.markerCreated += 1
       fake.markers.push(this)
     }
@@ -282,7 +408,7 @@ export function createFakeKakao(): FakeKakao {
     getMap() {
       return this.map
     }
-    setPosition(position: LatLng) {
+    setPosition(position: FakeLatLng) {
       this.position = position
     }
     getPosition() {
@@ -294,16 +420,27 @@ export function createFakeKakao(): FakeKakao {
     setImage(image: unknown) {
       this.image = image
     }
-    setZIndex() {}
+    setZIndex(zIndex: number) {
+      this.zIndex = zIndex
+    }
   }
 
   class Polyline implements FakePolyline {
     listeners: Record<string, ((event: unknown) => void)[]> = {}
     map: unknown
-    path: LatLng[]
-    constructor(options: { map?: unknown; path: LatLng[] }) {
+    path: FakeLatLng[]
+    zIndex: number | null
+    strokeWeight: number | null
+    constructor(options: {
+      map?: unknown
+      path: FakeLatLng[]
+      zIndex?: number
+      strokeWeight?: number
+    }) {
       this.map = options.map ?? null
       this.path = options.path
+      this.zIndex = options.zIndex ?? null
+      this.strokeWeight = options.strokeWeight ?? null
       calls.polylineCreated += 1
       fake.polylines.push(this)
     }

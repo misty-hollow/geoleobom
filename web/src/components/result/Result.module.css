@@ -585,7 +585,37 @@
   background: var(--paper);
 }
 
+/* 1줄: 태그 + 12px 링 + 카테고리·시설명 (DESIGN.md 11절). 높이 20. */
+.routeTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  min-height: 20px;
+}
+
+/*
+ * 지도 목적지 마커와 **같은 형태**의 12px 링 — "링 = 이 시설"(DESIGN.md 7-1 패널 연결 기호).
+ * 마커는 SVG 데이터 URI라 값을 공유할 수 없으므로 같은 토큰으로 다시 그린다.
+ */
+.routeRing {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 2px solid var(--accent-600);
+  box-shadow: inset 0 0 0 1.5px var(--paper);
+}
+
+/* 내용 교체는 `--dur-fade` 120 opacity. 시트 스냅(240)과 독립이다(DESIGN.md 11절). */
+.routeBody {
+  min-width: 0;
+  animation: fade var(--dur-fade) ease-out;
+}
+
 .routeTitle {
+  min-width: 0;
   font-size: var(--t-body-s);
   line-height: var(--lh-body-s);
   color: var(--ink-500);
@@ -627,6 +657,7 @@
   color: var(--ink-500);
 }
 
+/* 닫기는 그리드 우측 열 **세로 중앙**에만 둔다(핸들 줄·시트 모서리로 올리지 않는다). */
 .routeActions {
   display: flex;
   align-items: center;

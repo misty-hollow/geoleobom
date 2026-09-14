@@ -12,6 +12,15 @@
  * ## 시트 스냅과 경로 상태는 분리한다 (2026-09-12 보정 E)
  * 행 확장·경로 표시가 스냅을 옮기지 않는다. RoutePanel은 시트가 peek일 때만 보이고,
  * half·full에서는 확장된 행이 "경로 표시 중"을 말한다. 데스크톱은 헤더 아래 고정.
+ *
+ * ## 지도를 언제 움직이는가는 **경로가 바뀔 때만 정한다** (DESIGN.md 7-2, Week 4)
+ * 이 화면이 정하는 것은 "지금 그리는 경로가 첫 표시인가(`fit`) · 다른 시설로 바뀐
+ * 것인가(`auto`) · 같은 경로를 다시 그리는 것인가(`none`)"뿐이다. 얼마나 움직일지는
+ * 훅이 현재 배율·가시영역을 보고 정한다.
+ *
+ * 배치 전환·시트 높이 갱신은 **같은 경로를 다시 그리는 일**이라 `none`이다. 예전에는
+ * 이 재실행이 그대로 `setBounds`였기 때문에 모바일↔데스크톱을 오갈 때마다 지도가
+ * 다시 맞춰졌다 — "배치 전환에 지도는 움직이지 않는다"(7-2)와 어긋났다.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -50,12 +59,13 @@ import {
   type LonLatPair,
   type Point,
 } from '../coords'
+import { CATEGORY_LABEL } from '../format'
 import { toComparePath } from '../geo/compareUrl'
 import { useAnalysis } from '../hooks/useAnalysis'
 import { useCandidates } from '../hooks/useCandidates'
 import { useLayoutMode, useMediaQuery, type LayoutMode } from '../hooks/useLayoutMode'
 import { useRoute, type RouteTarget } from '../hooks/useRoute'
-import { useKakaoMap, type MapPin } from '../kakao/useKakaoMap'
+import { useKakaoMap, type MapPin, type RouteFrame } from '../kakao/useKakaoMap'
 import type { ErrorAction } from '../status/labels'
 import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
@@ -185,6 +195,33 @@ export function MapPage() {
     }
   }, [analysis.state, announcer])
 
+  /**
+   * 경로 전환 결과를 live region에 알린다 (DESIGN.md 11절 접근성).
+   *
+   * peek의 RoutePanel은 `role="status"`라 스스로 읽히지만, half·full에서는 상태를
+   * 말하는 것이 **확장 행 안의 태그**여서 버튼 안 텍스트 변화로 끝난다 — 스크린리더가
+   * 경로가 바뀐 것을 알 길이 없다. 문구는 새로 만들지 않고 화면에 이미 있는 것을
+   * 그대로 읽는다(`{카테고리} · {시설명}` + `경로 표시 중`).
+   */
+  const announcedRouteRef = useRef(false)
+  useEffect(() => {
+    const state = route.state
+    if (state.kind !== 'shown' || analysisData === null) {
+      // 경로가 사라졌는데 "경로 표시 중"이 live region에 남아 있으면 스크린리더가
+      // 없는 상태를 읽는다. 우리가 넣은 문장일 때만 비운다.
+      if (announcedRouteRef.current) {
+        announcedRouteRef.current = false
+        announcer.announce('')
+      }
+      return
+    }
+    const item = analysisData.nearest.find((entry) => entry.category === state.target.category)
+    const facility = item?.top3.find((entry) => entry.fid === state.target.fid) ?? item?.best ?? null
+    if (facility === null) return
+    announcedRouteRef.current = true
+    announcer.announce(`${CATEGORY_LABEL[state.target.category]} · ${facility.name} ${ko.row.routeShown}`)
+  }, [route.state, analysisData, announcer])
+
   // --- 지도 -----------------------------------------------------------------
   const onPinPlace = useCallback(
     (point: Point) => {
@@ -246,7 +283,8 @@ export function MapPage() {
   /** `insetRef.current`를 잰 배치. 배치가 바뀌면 다시 확정될 때까지 어긋난 채로 둔다. */
   const insetLayoutRef = useRef<LayoutMode | null>(null)
   const centerPending = useRef(false)
-  const routeFitPending = useRef(false)
+  /** inset을 아직 모르는 배치에서 미뤄 둔 경로 그리기. 어떤 frame이었는지까지 들고 간다. */
+  const routeFramePending = useRef<RouteFrame | null>(null)
 
   const drawn = route.drawn
   const drawnLine = useMemo<LonLatPair[] | null>(
@@ -261,15 +299,34 @@ export function MapPage() {
   const drawnLineRef = useRef(drawnLine)
   drawnLineRef.current = drawnLine
 
-  const fitRoute = useCallback(
-    (inset: number) => {
+  /** 목적지 링의 `title` = `{카테고리} · {시설명}` (DESIGN.md 7-1). */
+  const destinationTitle = useMemo(() => {
+    const state = route.state
+    if (state.kind !== 'shown' || analysisData === null) return null
+    const item = analysisData.nearest.find((entry) => entry.category === state.target.category)
+    const facility = item?.top3.find((entry) => entry.fid === state.target.fid) ?? item?.best ?? null
+    return facility === null ? null : `${CATEGORY_LABEL[state.target.category]} · ${facility.name}`
+  }, [route.state, analysisData])
+  const destinationTitleRef = useRef(destinationTitle)
+  destinationTitleRef.current = destinationTitle
+
+  const drawRoute = useCallback(
+    (inset: number, frame: RouteFrame) => {
       const line = drawnLineRef.current
       if (line === null) {
-        map.setRoute(null, 0)
+        // 지우기는 지도를 움직이지 않는다(DESIGN.md 7-2: × ·재탭·versions 불일치·404).
+        map.setRoute(null, { bottomInset: inset, frame: 'none' })
         return
       }
       // 모바일은 플로팅 상단바가 지도 위 0~72px을 가린다. 데스크톱 패널 배치에는 상단바가 없다.
-      map.setRoute({ line }, inset, layoutRef.current === 'sheet' ? TOPBAR_H : 0)
+      map.setRoute(
+        { line, origin: fixedRef.current ?? undefined, destinationTitle: destinationTitleRef.current ?? undefined },
+        {
+          bottomInset: inset,
+          topInset: layoutRef.current === 'sheet' ? TOPBAR_H : 0,
+          frame,
+        },
+      )
     },
     [map],
   )
@@ -289,26 +346,53 @@ export function MapPage() {
     if (insetLayoutRef.current !== 'sheet') insetLayoutRef.current = null
   }, [layout, map])
 
+  /**
+   * 핀은 **확정 좌표가 바뀔 때만** 시트 위 가시영역 세로 중앙으로 간다(DESIGN.md 7절).
+   *
+   * 배치 전환(`layout`)은 의존성에 **없다.** 7-2 마지막 줄이 "시트 스냅·행 확장·배치
+   * 전환 → 지도 이동 없음, 다음 조정 때 가시영역 재계산"이기 때문이다. 예전에는 전환도
+   * 다시 중심을 잡았고, 그래서 "전환 커밋에서 inset이 이전 배치 값"이라는 결함
+   * (Astra finding 2 후속)이 생길 자리가 있었다. 지금은 전환에서 아무것도 맞추지 않아
+   * 그 자리 자체가 없다 — MapPage.responsive.test.tsx가 그 사실을 검사한다.
+   */
   useEffect(() => {
     if (mapStatus !== 'ready' || fixedRef.current === null) return
-    if (insetLayoutRef.current !== layout || (layout === 'sheet' && snapRef.current !== 'half')) {
+    const at = layoutRef.current
+    if (insetLayoutRef.current !== at || (at === 'sheet' && snapRef.current !== 'half')) {
       centerPending.current = true
       return
     }
     centerPending.current = false
     map.centerOn(fixedRef.current, insetRef.current)
-  }, [mapStatus, map, fixedKey, layout])
+  }, [mapStatus, map, fixedKey])
+
+  // 새 좌표를 확정하면 경로 상태도 처음으로 돌아간다(DESIGN.md 7-2 마지막 줄).
+  useEffect(() => {
+    framedLineRef.current = null
+    map.resetUserMoved()
+  }, [fixedKey, map])
+
+  /**
+   * 마지막으로 **그린** 선. 같은 선을 다시 그리는 것(배치 전환)과 다른 시설로 바뀐 것을
+   * 가른다. `drawnLine`은 `drawn`에 메모된 값이라 같은 경로면 참조가 같다.
+   */
+  const framedLineRef = useRef<LonLatPair[] | null>(null)
 
   useEffect(() => {
     if (mapStatus !== 'ready') return
+    const previous = framedLineRef.current
+    // 첫 표시는 fit, 다른 시설로 바뀌면 auto, 같은 선을 다시 그리는 것이면 움직이지 않는다.
+    const frame: RouteFrame =
+      drawnLine === null ? 'none' : previous === null ? 'fit' : previous === drawnLine ? 'none' : 'auto'
+    framedLineRef.current = drawnLine
     // 경로를 지우는 것은 inset과 무관하다. 미룰 이유가 없다.
     if (drawnLine !== null && insetLayoutRef.current !== layout) {
-      routeFitPending.current = true
+      routeFramePending.current = frame
       return
     }
-    routeFitPending.current = false
-    fitRoute(insetRef.current)
-  }, [mapStatus, drawnLine, layout, fitRoute])
+    routeFramePending.current = null
+    drawRoute(insetRef.current, frame)
+  }, [mapStatus, drawnLine, layout, drawRoute])
 
   const onSheetHeight = useCallback(
     (height: number) => {
@@ -323,12 +407,13 @@ export function MapPage() {
         centerPending.current = false
         map.centerOn(fixedRef.current, inset)
       }
-      if (routeFitPending.current) {
-        routeFitPending.current = false
-        fitRoute(inset)
+      if (routeFramePending.current !== null) {
+        const frame = routeFramePending.current
+        routeFramePending.current = null
+        drawRoute(inset, frame)
       }
     },
-    [layout, map, fitRoute],
+    [layout, map, drawRoute],
   )
 
   // --- 행동 -----------------------------------------------------------------
@@ -353,18 +438,24 @@ export function MapPage() {
     setPending(null)
   }, [pending, navigate])
 
+  /** × ·같은 행 재탭으로 경로를 닫는다. 지도는 그대로 두고 `userMoved`만 끈다(DESIGN.md 7-2). */
+  const closeRoute = useCallback(() => {
+    route.hide()
+    setExpanded(null)
+    map.resetUserMoved()
+  }, [route, map])
+
   const toggleRow = useCallback(
     (category: NearestCategory) => {
       if (expanded === category) {
-        setExpanded(null)
-        route.hide()
+        closeRoute()
         return
       }
       setExpanded(category)
       const item = analysisData?.nearest.find((entry) => entry.category === category)
       if (item !== undefined && item.best !== null) route.show({ fid: item.best.fid, category })
     },
-    [expanded, analysisData, route],
+    [expanded, analysisData, route, closeRoute],
   )
 
   const showRoute = useCallback((target: RouteTarget) => route.show(target), [route])
@@ -456,10 +547,7 @@ export function MapPage() {
             onToggleRow={toggleRow}
             route={route.state}
             onShowRoute={showRoute}
-            onHideRoute={() => {
-              route.hide()
-              setExpanded(null)
-            }}
+            onHideRoute={closeRoute}
             onRetryRoute={route.retry}
             pinnedRoutePanel={pinnedRoutePanel}
           />
@@ -497,10 +585,7 @@ export function MapPage() {
           <RoutePanel
             state={route.state}
             analysis={analysis.state.data}
-            onClose={() => {
-              route.hide()
-              setExpanded(null)
-            }}
+            onClose={closeRoute}
             onRetry={route.retry}
           />
         ) : (

@@ -255,6 +255,8 @@ describe('960px 왕복에도 지도가 살아 있다 (Astra finding 2)', () => {
         center: center === undefined ? null : [center.getLat(), center.getLng()],
         // (bounds, top, right, bottom, left)
         padding: bounds === undefined ? null : bounds.slice(1),
+        /** 프로그램 이동을 몇 번 했는가. 배치 전환에서는 늘어나면 안 된다. */
+        reframes: f.calls.setBounds.length + f.calls.panTo.length + f.calls.setCenter.length,
       }
     }
 
@@ -286,14 +288,25 @@ describe('960px 왕복에도 지도가 살아 있다 (Astra finding 2)', () => {
     fake = installFakeKakao()
     setViewportWidth(390)
     await mountWithRoute()
+    const beforeResize = { ...framing(fake), level: fake.lastMap!.getLevel() }
     await resize(1280)
     await waitFor(() => expect(document.querySelector('aside')).not.toBeNull())
     const moved = framing(fake)
 
-    expect(moved.center, '전환 뒤 중심이 cold entry와 다르다(모바일 시트 높이가 남았다)').toEqual(cold.center)
-    expect(moved.padding, '전환 뒤 경로 fit 패딩이 cold entry와 다르다').toEqual(cold.padding)
-    // 데스크톱에는 시트도 상단바도 없다. 패딩 넷이 모두 24(DESIGN.md 7절)여야 stale이 아니다.
-    expect(moved.padding).toEqual([24, 24, 24, 24])
+    // 데스크톱 cold entry: 시트도 상단바도 없다. 좌·우·하는 여백 24, 상단은 24 + 핀 높이 40
+    // (핀은 좌표에서 위로 자란다 — DESIGN.md 7-1·7-2).
+    expect(cold.padding).toEqual([24 + 40, 24, 24, 24])
+
+    // **배치 전환은 지도를 움직이지 않는다**(DESIGN.md 7-2 마지막 줄). 그래서 전환 뒤의
+    // 프레이밍은 "모바일에서 맞춘 그대로"이며 cold entry와 같을 이유가 없다. 예전 검사는
+    // 전환이 곧 재-fit이던 시절의 것이라 두 값을 맞대 봤다.
+    //
+    // 지금 지켜야 하는 것은 **아무것도 다시 맞추지 않았다**는 사실이다. 그 자리에서
+    // 예전 결함(모바일 시트 높이가 남은 채로 다시 맞추기)도 함께 불가능해진다 —
+    // 다시 맞추는 일 자체가 없기 때문이다.
+    expect(moved.reframes, '배치 전환이 지도를 다시 맞췄다').toEqual(beforeResize.reframes)
+    expect(moved.center, '배치 전환이 중심을 옮겼다').toEqual(beforeResize.center)
+    expect(fake.lastMap!.getLevel(), '배치 전환이 배율을 바꿨다').toBe(beforeResize.level)
 
     // --- 왕복해도 흘러가지 않는다 ---
     await resize(390)

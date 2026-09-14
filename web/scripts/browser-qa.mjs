@@ -434,17 +434,28 @@ async function main() {
       await handle.focus()
       await page.keyboard.press('ArrowDown')
       await page.waitForTimeout(300)
-      const routePanel = await page.$('text=경로 닫기')
+      // 닫기는 × 아이콘 버튼이다. 화면에 "경로 닫기" 텍스트 노드는 없고 aria-label만 있다(DESIGN.md 9·11절).
+      const routePanel = await page.$('button[aria-label="경로 닫기"]')
       check(`${vp.name}: peek에서 RoutePanel`, routePanel !== null)
       const rp = await page.evaluate(() => {
-        const close = Array.from(document.querySelectorAll('button')).find((b) => b.textContent.trim() === '경로 닫기')
+        const close = document.querySelector('button[aria-label="경로 닫기"]')
         const panel = close.closest('section[data-snap] > div:last-child > div')
         const title = panel.querySelector('p')
-        return { left: Math.round(title.getBoundingClientRect().left), closeRight: Math.round(close.getBoundingClientRect().right), inner: window.innerWidth }
+        const box = close.getBoundingClientRect()
+        return {
+          left: Math.round(title.getBoundingClientRect().left),
+          closeRight: Math.round(box.right),
+          inner: window.innerWidth,
+          tap: [Math.round(box.width), Math.round(box.height)],
+          text: close.textContent.trim(),
+          tag: Array.from(panel.querySelectorAll('span')).some((el) => el.textContent.trim() === '경로 표시 중'),
+        }
       })
+      check(`${vp.name}: 닫기는 44×44 × 아이콘(텍스트 노드 없음)`, rp.tap[0] >= 44 && rp.tap[1] >= 44 && rp.text === '', JSON.stringify(rp))
+      check(`${vp.name}: RoutePanel 태그 '경로 표시 중'`, rp.tag === true)
       check(`${vp.name}: RoutePanel 좌우 패딩(좌 ≥12, 닫기 버튼 화면 안)`, rp.left >= 12 && rp.closeRight <= rp.inner, JSON.stringify(rp))
       await shot(page, `${vp.name}-06-route-peek`)
-      await page.click('text=경로 닫기')
+      await page.click('button[aria-label="경로 닫기"]')
       await page.waitForTimeout(100)
       check(`${vp.name}: 경로 닫기 후 SummaryStrip`, (await page.$('ul[aria-label="요약"]')) !== null)
 
@@ -485,9 +496,9 @@ async function main() {
       const panelW = await page.$eval('aside', (el) => Math.round(el.getBoundingClientRect().width))
       check(`${vp.name}: 패널 폭 400`, panelW === 400, String(panelW))
       await page.click('#row-grocery')
-      await page.waitForSelector('text=경로 닫기')
+      await page.waitForSelector('button[aria-label="경로 닫기"]')
       await shot(page, `${vp.name}-05-route`)
-      await page.click('text=경로 닫기')
+      await page.click('button[aria-label="경로 닫기"]')
       await page.fill('[role="combobox"]', '공주')
       await page.waitForSelector('[role="option"]')
       await shot(page, `${vp.name}-07-inline-search`)
@@ -512,7 +523,7 @@ async function main() {
     const staleShot = await page.evaluate(() => ({
       skeleton: document.querySelectorAll('[aria-busy="true"]').length,
       routeShown: Array.from(document.querySelectorAll('*')).some((el) => el.childElementCount === 0 && el.textContent === '경로 표시 중'),
-      closeBtn: Array.from(document.querySelectorAll('button')).some((b) => b.textContent.trim() === '경로 닫기'),
+      closeBtn: document.querySelector('button[aria-label="경로 닫기"]') !== null,
     }))
     check(`${vp.name}: 버전 불일치 → 안내 + 재분석 스켈레톤, 경로 UI 없음`, staleShot.skeleton >= 1 && !staleShot.routeShown && !staleShot.closeBtn, JSON.stringify(staleShot))
     await shot(page, `${vp.name}-17-route-stale`)
