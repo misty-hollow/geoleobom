@@ -281,6 +281,8 @@ REDACTION_CASES = (
     ("/assets/index-AbC123.js", "/assets"),
     ("/api/analyze?lon=127.14020&lat=36.47130", "/api/analyze"),
     ("/api/search?q=%EA%B3%B5%EC%A3%BC", "/api/search"),
+    # v2.5 5절: `/api/search`의 지도 중심 lon·lat도 좌표 원문이다.
+    ("/api/search?q=%EA%B3%B5%EC%A3%BC&lon=127.38450&lat=36.35040", "/api/search"),
     ("/c?p=36.47130,127.14020", "/c"),
     ("/about", "/about"),
     ("/../../36.47130,127.14020", "/"),

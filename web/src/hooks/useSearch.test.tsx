@@ -5,6 +5,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SearchResult } from '../api/client'
+import { normalize, type Point } from '../coords'
 import { jsonResponse } from '../test/fixtures'
 import { SEARCH_DEBOUNCE_MS, useSearch } from './useSearch'
 
@@ -154,5 +155,80 @@ describe('useSearch', () => {
     })
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result.current.state.kind).toBe('idle')
+  })
+})
+
+/**
+ * 지도 중심 기준 검색 (v2.5 4-4).
+ *
+ * 여기서 지키는 것: **보낼 때 5자리**, 둘 다 또는 둘 다 없음, 그리고 결과에 그
+ * 중심이 함께 남는가(행의 거리가 그 기준으로 읽혀야 한다).
+ */
+describe('useSearch — 지도 중심 (v2.5 4-4)', () => {
+  const fetchMock = vi.fn<typeof fetch>()
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValue(jsonResponse(results(2)))
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  async function searchWith(mapCenter?: () => Point | null) {
+    const { result } = renderHook(() => useSearch({ mapCenter }))
+    act(() => result.current.setQuery('공주대'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    return { result, url: new URL(String(fetchMock.mock.calls[0][0]), 'https://x') }
+  }
+
+  it('지도 중심이 없으면 lon·lat를 보내지 않는다 (v2.4 동작 그대로)', async () => {
+    const { url } = await searchWith()
+    expect(url.searchParams.has('lon')).toBe(false)
+    expect(url.searchParams.has('lat')).toBe(false)
+    expect(url.searchParams.get('q')).toBe('공주대')
+  })
+
+  it('지도가 아직 없어 null이면 보내지 않는다', async () => {
+    const { url } = await searchWith(() => null)
+    expect(url.searchParams.has('lon')).toBe(false)
+    expect(url.searchParams.has('lat')).toBe(false)
+  })
+
+  it('지도 중심을 5자리로 잘라 둘 다 보낸다', async () => {
+    // 5자리보다 정밀한 값을 준다. normalize가 경계에서 한 번 자른다.
+    const center = normalize(127.14024119, 36.47130552)!
+    const { url } = await searchWith(() => center)
+    expect(url.searchParams.get('lon')).toBe('127.14024')
+    expect(url.searchParams.get('lat')).toBe('36.47131')
+  })
+
+  it('요청에 쓴 중심이 결과와 함께 남는다', async () => {
+    const center = normalize(127.3845, 36.3504)!
+    const { result } = await searchWith(() => center)
+    expect(result.current.state).toMatchObject({ kind: 'results', center })
+  })
+
+  it('결과가 오기 전 지도를 움직여도 그 목록의 기준은 보낼 때의 중심이다', async () => {
+    let current = normalize(127.3845, 36.3504)!
+    const { result } = renderHook(() => useSearch({ mapCenter: () => current }))
+    act(() => result.current.setQuery('공주대'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS)
+    })
+    // 응답이 오기 전에 사용자가 지도를 옮겼다.
+    const moved = normalize(126.9, 37.5)!
+    current = moved
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.state).toMatchObject({ kind: 'results', center: normalize(127.3845, 36.3504)! })
   })
 })

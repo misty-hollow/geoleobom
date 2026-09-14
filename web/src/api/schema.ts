@@ -70,11 +70,16 @@ export interface paths {
         };
         /**
          * Search
-         * @description 카카오 로컬 검색 프록시 (v2.4 4-4).
+         * @description 카카오 로컬 검색 프록시 (v2.4 4-4, v2.5 4-4).
          *
          *     **검색어를 서버에 저장하거나 캐시하지 않는다**(4-4, 5절). 실패 처리도 4-4대로다 —
          *     카카오 timeout은 기존 `TIMEOUT`(504), 그 밖의 카카오 실패는 계약 밖 HTTP 실패(502).
          *     새 제품 오류 코드를 만들지 않는다.
+         *
+         *     `lon`·`lat`는 **현재 지도 중심**이며 선택이다(v2.5 4-4). 둘 다 없으면 v2.4와 같은
+         *     동작이고, 있으면 키워드 갈래에만 위치 bias로 실린다(adapter 맨 위). 한쪽만 오면
+         *     제품 오류 코드를 만들지 않고 **계약 밖 422**다. 응답 모양은 어느 경우에도 같다 —
+         *     `name`·`address`·`lon`·`lat` 넷이며 거리 필드를 더하지 않는다.
          */
         get: operations["search_api_search_get"];
         put?: never;
@@ -396,6 +401,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
+                lon?: number | null;
+                lat?: number | null;
             };
             header?: never;
             path?: never;

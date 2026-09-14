@@ -33,6 +33,8 @@ export interface FakePolyline extends FakeTarget {
 export interface FakeMap extends FakeTarget {
   center: FakeLatLng
   level: number
+  /** 사용자가 지도를 옮긴 상태를 만든다. 검색이 읽는 "지금 중심"이 이 값이다(v2.5 4-4). */
+  setCenter: (latlng: FakeLatLng) => void
   /** 지도를 만들 때 받은 요소. SDK는 이 요소를 계속 붙들고 산다. */
   container: HTMLElement
   relayoutCount: number
@@ -207,11 +209,13 @@ export function createFakeKakao(): FakeKakao {
 
   class Map implements FakeMap {
     listeners: Record<string, ((event: unknown) => void)[]> = {}
-    center: LatLng
+    // 좌표는 공개 인터페이스(`FakeLatLng`)로 받는다. 검사가 `fake.latLng(...)`으로
+    // 만든 값도 그대로 넣을 수 있어야 한다 — 지도를 옮긴 상태를 만드는 통로다.
+    center: FakeLatLng
     level: number
     container: HTMLElement
     relayoutCount = 0
-    constructor(container: HTMLElement, options: { center: LatLng; level: number }) {
+    constructor(container: HTMLElement, options: { center: FakeLatLng; level: number }) {
       this.container = container
       this.center = options.center
       this.level = options.level
@@ -226,7 +230,7 @@ export function createFakeKakao(): FakeKakao {
       calls.mapCreated += 1
       fake.lastMap = this
     }
-    setCenter(latlng: LatLng) {
+    setCenter(latlng: FakeLatLng) {
       this.center = latlng
       calls.setCenter.push(latlng)
     }

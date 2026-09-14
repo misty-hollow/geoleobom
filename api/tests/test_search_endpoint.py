@@ -517,3 +517,169 @@ def test_adapter_exception_messages_carry_no_query_or_url():
     assert REST_KEY not in message
     assert "dapi.kakao.com" not in message
     assert "503" in message
+
+
+# --- v2.5 4-4: 지도 중심 기준 검색 -----------------------------------------
+
+# 대전 시청 부근. "지도 중심"으로 쓰는 값이며 공주대와 약 35km 떨어져 있다.
+CENTER = {"lon": 127.38450, "lat": 36.35040}
+
+
+def _captured_params(handler_payload=None):
+    """각 갈래가 카카오에 **실제로 보낸 쿼리 파라미터**를 모은다."""
+    seen: dict[str, dict[str, str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen[request.url.path] = dict(request.url.params)
+        return _both_ok(request)
+
+    return seen, handler
+
+
+def test_without_a_map_centre_the_request_is_unchanged():
+    """v2.5 4-4: "둘 다 없으면 v2.4와 같은 동작(bias 없음)이다"."""
+    seen, handler = _captured_params()
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY})
+
+    assert response.status_code == 200
+    for path in (KAKAO_KEYWORD_PATH, KAKAO_ADDRESS_PATH):
+        assert set(seen[path]) == {"query", "size"}
+
+
+def test_the_map_centre_biases_only_the_keyword_branch():
+    """v2.5 4-4: 키워드 갈래에만 bias. **주소 갈래는 전국 그대로.**"""
+    seen, handler = _captured_params()
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY, **CENTER})
+
+    assert response.status_code == 200
+    keyword = seen[KAKAO_KEYWORD_PATH]
+    assert float(keyword["x"]) == pytest.approx(CENTER["lon"])
+    assert float(keyword["y"]) == pytest.approx(CENTER["lat"])
+    # 주소 검색 address.json에는 위치 파라미터가 아예 없다. 우리도 보내지 않는다.
+    assert set(seen[KAKAO_ADDRESS_PATH]) == {"query", "size"}
+
+
+def test_the_bias_never_narrows_the_keyword_search_to_a_radius():
+    """**정확 일치를 거리로 배제하지 않는다**(v2.5 4-4)를 요청 쪽에서 지킨다.
+
+    `radius`는 반경 밖 결과를 잘라내고, `sort=distance`는 15칸을 가까운 것으로 채워
+    멀리 있는 정확 일치를 목록 밖으로 민다. 둘 다 보내지 않는다.
+    """
+    seen, handler = _captured_params()
+    with _client(handler) as client:
+        client.get("/api/search", params={"q": QUERY, **CENTER})
+
+    keyword = seen[KAKAO_KEYWORD_PATH]
+    assert "radius" not in keyword
+    assert "rect" not in keyword
+    assert "sort" not in keyword
+
+
+def test_a_far_exact_match_still_comes_back_with_a_map_centre():
+    """대전에서 "공주대"를 쳤을 때 35km 떨어진 정확 일치가 남아야 한다(v2.5 3절).
+
+    서버는 카카오가 준 결과를 거리로 걸러내지 않는다 — 걸러내는 코드가 생기면 여기서 깨진다.
+    """
+    with _client(_both_ok) as client:
+        body = client.get("/api/search", params={"q": QUERY, **CENTER}).json()
+
+    assert any(item["name"] == "공주대학교 신관캠퍼스" for item in body)
+
+
+def test_the_response_shape_is_the_same_with_a_map_centre():
+    """v2.5 4-4: "응답 모양은 바뀌지 않는다." 거리 필드를 더하지 않는다."""
+    with _client(_both_ok) as client:
+        plain = client.get("/api/search", params={"q": QUERY}).json()
+        biased = client.get("/api/search", params={"q": QUERY, **CENTER}).json()
+
+    assert all(set(item) == {"name", "address", "lon", "lat"} for item in biased)
+    assert biased == plain
+
+
+def test_partial_failure_and_dedupe_still_hold_with_a_map_centre():
+    """한 갈래 실패·중복 제거 의미는 지도 중심이 있어도 그대로다(v2.4 4-4)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == KAKAO_ADDRESS_PATH:
+            return httpx.Response(500, json={"msg": "address down"})
+        return httpx.Response(200, json=KEYWORD_PAYLOAD)
+
+    with _client(handler) as client:
+        response = client.get("/api/search", params={"q": QUERY, **CENTER})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body] == [
+        "공주대학교 신관캠퍼스",
+        "공주대학교 정문",
+    ]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"lon": CENTER["lon"]},
+        {"lat": CENTER["lat"]},
+    ],
+    ids=["lon-only", "lat-only"],
+)
+def test_half_a_map_centre_is_422_and_not_a_product_error(params):
+    """v2.5 4-4: "한쪽만 오면 FastAPI 쿼리 검증 실패(422, 계약 밖)"."""
+    with _client(_both_ok) as client:
+        response = client.get("/api/search", params={"q": QUERY, **params})
+
+    assert response.status_code == 422
+    # 제품 오류 6종이 아니다 — 새 코드를 만들지 않았다.
+    assert "code" not in response.json()
+
+
+def test_an_out_of_range_map_centre_is_422():
+    with _client(_both_ok) as client:
+        response = client.get("/api/search", params={"q": QUERY, "lon": 999, "lat": 36.35})
+
+    assert response.status_code == 422
+
+
+def test_the_422_body_does_not_echo_the_query_or_the_centre():
+    """422도 응답이다. 검색어와 지도 중심 좌표를 되비추지 않는다(v2.5 5절)."""
+    with _client(_both_ok) as client:
+        response = client.get("/api/search", params={"q": QUERY, "lon": CENTER["lon"]})
+
+    assert response.status_code == 422
+    assert QUERY not in response.text
+    assert "127.3845" not in response.text
+
+
+def test_the_map_centre_never_appears_in_the_access_log(access_log):
+    """v2.5 5절: 지도 중심 `lon`·`lat`도 좌표 원문이다 — 로그에 남지 않는다."""
+    with _client(_both_ok) as client:
+        client.get("/api/search", params={"q": QUERY, **CENTER})
+        client.get("/api/search", params={"q": QUERY, "lon": CENTER["lon"]})
+
+    written = access_log.getvalue()
+    assert "route=/api/search" in written
+    assert "127.3845" not in written
+    assert "36.3504" not in written
+    assert QUERY not in written
+
+
+def test_adapter_exception_messages_carry_no_map_centre():
+    """adapter 단위에서도 좌표가 문구에 새지 않는지 본다."""
+    import asyncio
+
+    from app.analysis.errors import KakaoUnavailable
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"msg": "down"})
+
+    adapter = KakaoLocalClient(
+        REST_KEY, client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(KakaoUnavailable) as caught:
+        asyncio.run(adapter.search(QUERY, center=(CENTER["lon"], CENTER["lat"])))
+
+    message = str(caught.value)
+    assert "127.3845" not in message
+    assert "36.3504" not in message

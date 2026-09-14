@@ -29,6 +29,29 @@ v2.4 3절이 "카카오 로컬 키워드+주소 검색 결과에서 선택"이�
 결과만으로 답하고, 부분 실패는 응답 형태를 바꾸지 않는다(v2.4 4-4는 `/search`에
 새 필드나 새 오류 코드를 만들지 않는다).
 
+## 지도 중심은 **키워드 갈래에만** 준다 (v2.5 4-4)
+
+v2.5 4-4: "지도 중심이 있으면 **키워드 검색 갈래에만** 위치 bias로 쓴다 — 가까운 결과를
+앞에 두되, 카카오가 돌려준 **정확 일치 결과를 거리로 배제하지 않는다.** 주소 검색
+갈래는 전국 그대로이며 지도 중심을 쓰지 않는다."
+
+카카오 로컬 keyword.json이 받는 위치 파라미터는 `x`·`y`(중심), `radius`(반경), `rect`,
+`sort`다. 이 중 **`x`·`y`만** 보낸다.
+
+  - `radius`를 주면 그 반경 **밖 결과가 제외된다.** 대전에서 "공주대"가 사라진다 —
+    v2.5가 명시적으로 금지한 것이 이것이다.
+  - `sort=distance`도 쓰지 않는다. 배제하지는 않지만 15개가 전부 가까운 것으로 채워져
+    멀리 있는 정확 일치가 목록 밖으로 밀린다. 결과가 같다.
+  - `x`·`y`만 주고 기본 정렬(`accuracy`)을 그대로 두면 카카오가 정확도에 거리를 함께
+    반영한다. 주변이 앞에 오고 먼 정확 일치는 남는다. 이것이 v2.5가 말한 bias다.
+
+주소 검색 address.json에는 **애초에 위치 파라미터가 없다.** 그래서 "주소는 전국"은
+갈래를 나눠 둔 구조 자체로 지켜지고, 이 모듈은 주소 갈래에 중심을 넘기지 않는다.
+
+중심 좌표는 사용자 좌표 원문과 같은 개인정보 규칙을 따른다(v2.5 5절) — 검색어와
+똑같이 예외 문구·로그 어디에도 넣지 않는다. 여기서 5자리로 깎지도 않는다. 반올림은
+프론트가 보내기 전에 한 번 한다.
+
 ## 스키마를 지키지 않은 응답은 **빈 결과가 아니다** (Astra finding 6)
 
 `documents: []`는 "그 검색어로 나온 것이 없다"이고, `documents`가 아예 없거나 리스트가
@@ -96,17 +119,28 @@ class KakaoLocalClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def search(self, query: str) -> list[SearchHit]:
-        """키워드 + 주소 결과를 합쳐 축약 형태로 돌려준다 (v2.4 4-4).
+    async def search(
+        self, query: str, *, center: tuple[float, float] | None = None
+    ) -> list[SearchHit]:
+        """키워드 + 주소 결과를 합쳐 축약 형태로 돌려준다 (v2.4 4-4, v2.5 4-4).
 
         키워드를 앞에 둔다. 장소 이름으로 찾으면 주소 API가 빈 결과를 주고, 주소로
         찾으면 키워드 API가 빈 결과를 주므로 두 경우 모두 원하는 쪽이 앞에 온다.
+
+        `center`는 현재 **지도 중심** `(lon, lat)`이며 선택이다. 있으면 키워드 갈래에만
+        위치 bias로 실린다(파일 맨 위). 주소 갈래는 전국 그대로다.
         """
         # **파싱까지 각 갈래 안에서** 한다. 그래야 스키마가 어긋난 쪽만 실패로 접히고
         # 멀쩡한 쪽 결과는 그대로 나간다. 밖에서 파싱하면 한 갈래의 잘못된 행 하나가
         # 요청 전체를 죽인다(Astra finding 6).
         keyword, address = await asyncio.gather(
-            self._branch(KAKAO_KEYWORD_PATH, query, KEYWORD_ENDPOINT, _keyword_hits),
+            self._branch(
+                KAKAO_KEYWORD_PATH,
+                query,
+                KEYWORD_ENDPOINT,
+                _keyword_hits,
+                extra=_bias_params(center),
+            ),
             self._branch(KAKAO_ADDRESS_PATH, query, ADDRESS_ENDPOINT, _address_hits),
             return_exceptions=True,
         )
@@ -121,21 +155,34 @@ class KakaoLocalClient:
                 hits.extend(branch)
         return _dedupe(hits)[:SEARCH_RESULT_LIMIT]
 
-    async def _branch(self, path: str, query: str, endpoint: str, parse: Parser) -> list[SearchHit]:
+    async def _branch(
+        self,
+        path: str,
+        query: str,
+        endpoint: str,
+        parse: Parser,
+        *,
+        extra: dict[str, str] | None = None,
+    ) -> list[SearchHit]:
         """카카오 한 곳을 부르고 **그 자리에서** 축약 형태로 옮긴다."""
-        payload = await self._fetch(path, query, endpoint)
+        payload = await self._fetch(path, query, endpoint, extra)
         try:
             return parse(payload)
         except MalformedResponse as exc:
             # 무엇이 어긋났는지 필드 이름만 남긴다. 원문·검색어는 넣지 않는다(5절).
             raise KakaoUnavailable(f"카카오 응답 스키마가 다르다: {endpoint} ({exc})") from exc
 
-    async def _fetch(self, path: str, query: str, endpoint: str) -> dict:
-        """카카오 한 곳. **예외 문구에 검색어·URL·응답 body를 넣지 않는다.**"""
+    async def _fetch(
+        self, path: str, query: str, endpoint: str, extra: dict[str, str] | None = None
+    ) -> dict:
+        """카카오 한 곳. **예외 문구에 검색어·좌표·URL·응답 body를 넣지 않는다.**"""
+        params = {"query": query, "size": str(KAKAO_PAGE_SIZE)}
+        if extra:
+            params.update(extra)
         try:
             response = await self._client.get(
                 f"{self._base_url}{path}",
-                params={"query": query, "size": str(KAKAO_PAGE_SIZE)},
+                params=params,
                 headers={"Authorization": f"KakaoAK {self._rest_key}"},
             )
         except httpx.TimeoutException as exc:
@@ -153,6 +200,18 @@ class KakaoLocalClient:
         if not isinstance(payload, dict):
             raise KakaoUnavailable(f"카카오 응답이 객체가 아니다: {endpoint}")
         return payload
+
+
+def _bias_params(center: tuple[float, float] | None) -> dict[str, str] | None:
+    """지도 중심을 카카오 keyword.json의 위치 파라미터로 옮긴다 (v2.5 4-4).
+
+    **`radius`를 넣지 않는다.** 넣는 순간 반경 밖 정확 일치가 사라진다(파일 맨 위).
+    `sort`도 건드리지 않아 기본 `accuracy`를 그대로 쓴다.
+    """
+    if center is None:
+        return None
+    lon, lat = center
+    return {"x": repr(lon), "y": repr(lat)}
 
 
 def _worst(failures: list[BaseException]) -> BaseException:

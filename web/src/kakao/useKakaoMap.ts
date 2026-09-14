@@ -112,6 +112,16 @@ export interface MapController {
    * SDK가 놓은 자리로 둔다. `bottomInset`이 0일 때도 SDK 자리로 되돌린다.
    */
   setAttributionInset: (bottomInset: number, topInset?: number) => void
+  /**
+   * 지금 지도 중심 (v2.5 4-4). 지도가 아직 없으면 `null`.
+   *
+   * 검색이 카카오에 줄 위치 bias가 이 값이다. `Point`로 돌려주므로 **여기서 5자리로
+   * 정규화된다** — v2.5 4-4의 "프론트는 보내기 전에 5자리로 잘라 불필요한 정밀도를
+   * 내보내지 않는다"가 이 경계 한 곳에서 지켜진다. 정규화 자체는 `coords.ts`가 한다.
+   *
+   * 어디에도 저장하지 않는다. 부를 때마다 지도에 묻고 쓰고 버린다(5절).
+   */
+  center: () => Point | null
   /** 공주대 신관캠퍼스 정문, level 4로 되돌린다(v2.4 3절 지원 지역 정책). */
   recenter: () => void
   zoomBy: (delta: 1 | -1) => void
@@ -552,6 +562,14 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
     map.setBounds(bounds, topInset + 24, 24, bottomInset + 24, 24)
   }, [])
 
+  const center = useCallback((): Point | null => {
+    const map = mapRef.current
+    if (map === null) return null
+    const current = map.getCenter()
+    // 카카오는 (lat, lng)로 준다. 경계에서 내부 [lon, lat]으로 바꾸며 정규화한다.
+    return fromKakao(current.getLat(), current.getLng())
+  }, [])
+
   const recenter = useCallback(() => {
     const map = mapRef.current
     if (map === null) return
@@ -572,8 +590,18 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
   }, [])
 
   const map = useMemo<MapController>(
-    () => ({ attach, centerOn, setPin, setRoute, setAttributionInset, recenter, zoomBy, retry }),
-    [attach, centerOn, setPin, setRoute, setAttributionInset, recenter, zoomBy, retry],
+    () => ({
+      attach,
+      centerOn,
+      setPin,
+      setRoute,
+      setAttributionInset,
+      center,
+      recenter,
+      zoomBy,
+      retry,
+    }),
+    [attach, centerOn, setPin, setRoute, setAttributionInset, center, recenter, zoomBy, retry],
   )
 
   return useMemo(() => ({ status, map }), [status, map])
