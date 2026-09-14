@@ -241,6 +241,68 @@ describe('MapPage', () => {
     expect(window.localStorage.length).toBe(0)
   })
 
+  it('검색은 **지금 지도 중심**을 5자리로 보내고 결과 행에 그 기준 거리를 보인다 (v2.5 4-4, DESIGN.md 22절)', async () => {
+    const seen: URL[] = []
+    handler = (url) => {
+      if (url.pathname === '/api/search') {
+        seen.push(url)
+        return jsonResponse([
+          // 중심 바로 옆 하나, 25km 넘게 떨어진 정확 일치 하나.
+          { name: '가까운 곳', address: '충남 공주시 신관동 1', lon: 127.14121, lat: 36.47129 },
+          { name: '공주대학교 신관캠퍼스', address: '충남 공주시 공주대학로 56', lon: 127.14021, lat: 36.47129 },
+        ])
+      }
+      return jsonResponse(typicalAnalysis())
+    }
+    renderAt('/')
+    await waitFor(() => expect(fake.calls.mapCreated).toBe(1))
+    // 사용자가 지도를 대전 쪽으로 옮긴 상태에서 검색한다.
+    act(() => {
+      fake.lastMap!.setCenter(fake.latLng(36.35042, 127.38451))
+    })
+    fireEvent.click(screen.getByRole('button', { name: '검색' }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '공주대' } })
+    const option = await screen.findByRole('option', { name: /공주대학교 신관캠퍼스/ }, { timeout: 2000 })
+
+    // 1) 실제 지도 중심이 5자리로 실려 나갔다. 둘 다 또는 둘 다 없음이다.
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0))
+    const sent = seen[seen.length - 1]
+    expect(sent.searchParams.get('lon')).toBe('127.38451')
+    expect(sent.searchParams.get('lat')).toBe('36.35042')
+
+    // 2) 행 우측 거리는 그 중심 기준이다 — 멀리 있는 정확 일치도 목록에 남는다.
+    expect(option.textContent).toMatch(/2[0-9]km$/)
+    const near = screen.getByRole('option', { name: /가까운 곳/ })
+    expect(near.textContent).toMatch(/2[0-9]km$/)
+
+    // 3) 정렬 기준을 설명하는 문구를 만들지 않는다(DESIGN.md 22절 "안내 문구: 없음").
+    expect(screen.queryByText(/가까운 순/)).toBeNull()
+  })
+
+  it('지도가 없으면(SDK 꺼짐) 지도 중심 없이 검색하고 거리를 보이지 않는다', async () => {
+    const seen: URL[] = []
+    handler = (url) => {
+      if (url.pathname === '/api/search') {
+        seen.push(url)
+        return jsonResponse([
+          { name: '공주대학교 신관캠퍼스', address: '충남 공주시 공주대학로 56', lon: 127.14021, lat: 36.47129 },
+        ])
+      }
+      return jsonResponse(typicalAnalysis())
+    }
+    uninstallFakeKakao()
+    resetKakaoSdkForTests()
+    renderAt('/')
+    fireEvent.click(screen.getByRole('button', { name: '검색' }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '공주대' } })
+    const option = await screen.findByRole('option', { name: /공주대학교 신관캠퍼스/ }, { timeout: 2000 })
+
+    const sent = seen[seen.length - 1]
+    expect(sent.searchParams.has('lon')).toBe(false)
+    expect(sent.searchParams.has('lat')).toBe(false)
+    expect(option.textContent).not.toMatch(/km|m$/)
+  })
+
   it('담기 → 토스트 + localStorage에는 좌표 문자열만. 재탭은 뺀다', async () => {
     renderAt('/p/36.47130,127.14020')
     await screen.findByText(METHOD_NOTICE)

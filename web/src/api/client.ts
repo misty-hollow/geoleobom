@@ -173,9 +173,23 @@ export function route(point: Point, fid: number, signal?: AbortSignal): Promise<
   return getJson<RouteResponse>(`/api/route?${query.toString()}`, signal)
 }
 
-/** v2.4 4-4 `GET /api/search?q=`. 결과는 서버에 저장되지 않는다. */
-export function search(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+/**
+ * v2.5 4-4 `GET /api/search?q=&lon=&lat=`. 결과는 서버에 저장되지 않는다.
+ *
+ * `center`는 현재 **지도 중심**이며 선택이다. 주면 `lon`·`lat`를 **둘 다** 싣는다 —
+ * 한쪽만 보내면 서버가 422다. 정규화된 문자열(`lonText`·`latText`)을 그대로 쓰므로
+ * 5자리보다 정밀한 값이 나가지 않는다(v2.5 4-4).
+ */
+export function search(
+  query: string,
+  center?: Point | null,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
   const params = new URLSearchParams({ q: query })
+  if (center != null) {
+    params.set('lon', center.lonText)
+    params.set('lat', center.latText)
+  }
   return getJson<SearchResult[]>(`/api/search?${params.toString()}`, signal)
 }
 

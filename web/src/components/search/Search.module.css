@@ -130,12 +130,32 @@
 
 .option {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  gap: var(--s-3);
   min-height: var(--row-h);
   padding: var(--s-2) var(--s-4);
   border-bottom: 1px solid var(--line);
   cursor: pointer;
+}
+
+/* 이름 + 주소. 가로가 좁아지면 이쪽이 줄고 거리는 그대로 남는다. */
+.optionText {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 지도 중심 기준 직선거리 (DESIGN.md 22절). 우정렬·tabular. */
+.optionDistance {
+  flex: 0 0 auto;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .optionActive {

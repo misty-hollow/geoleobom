@@ -95,6 +95,26 @@ export function metersText(meters: number): string {
   return `${Math.round(meters)}m`
 }
 
+/**
+ * 검색 결과 행의 거리 표기 (DESIGN.md 22절, v2.5 4-5).
+ *
+ * 규칙: `<1km {n}m` · `1~10km {n.n}km` · `≥10km {n}km`.
+ *
+ * 구간 판정은 **반올림한 뒤**에 한다. 먼저 판정하면 997m가 `1.0km`가 되고 9.97km가
+ * `10.0km`가 되어 규칙에 없는 표기가 나온다.
+ *
+ * `toFixed`를 쓰지 않는다 — 좌표 반올림을 `coords.ts` 한 곳으로 묶어 둔 경계 검사가
+ * 다른 파일의 `toFixed`를 막는다(scripts/check-boundaries.mjs). 0.1km 자리는 10배
+ * 정수로 올림해 직접 적는다.
+ */
+export function distanceText(meters: number): string {
+  const rounded = Math.round(meters)
+  if (rounded < 1000) return `${rounded}m`
+  const tenths = Math.round(meters / 100)
+  if (tenths < 100) return `${Math.trunc(tenths / 10)}.${tenths % 10}km`
+  return `${Math.round(meters / 1000)}km`
+}
+
 /** v2.4 3절 우회 표시: "직선 200m · 도보 900m". `detour_flag`가 켜졌을 때만 부른다. */
 export function detourText(facility: Facility): string {
   return `직선 ${metersText(facility.straight_m)} · 도보 ${metersText(facility.walk_m)}`

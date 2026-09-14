@@ -8,11 +8,18 @@
  * 접근성: `role="combobox"` + `aria-controls` + `aria-activedescendant`, ↑↓ Enter Esc.
  * 검색 실패는 이 컴포넌트 안에만 표시한다 — 분석 화면을 망가뜨리지 않는다(v2.4 4-5).
  * 선택 순간이 좌표 정규화의 "입력 시점"이다(4-2). 장소명·주소는 어디에도 저장하지 않는다.
+ *
+ * 결과 행 우측 거리는 **그 목록을 만든 지도 중심** 기준 직선거리다(DESIGN.md 22절).
+ * 값은 여기서 계산하며 API 응답에는 없다(v2.5 4-4). 정렬 기준을 설명하는 문구는
+ * 두지 않는다 — 거리 열이 기준을 말한다(22절 "안내 문구: 없음").
  */
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { SearchResult } from '../../api/client'
 import { ko } from '../../copy/ko'
+import type { Point } from '../../coords'
+import { distanceText } from '../../format'
+import { distanceMeters } from '../../geo/distance'
 import { useSearch } from '../../hooks/useSearch'
 import { Button, Spinner } from '../../ui/Button'
 import { Icon } from '../../ui/Icon'
@@ -23,16 +30,27 @@ export interface SearchBoxProps {
   onSelect: (result: SearchResult) => void
   onBack?: () => void
   autoFocus?: boolean
+  /** 지금 지도 중심을 돌려주는 함수 (v2.5 4-4). 지도가 없으면 `null`을 준다. */
+  mapCenter?: () => Point | null
 }
 
-export function SearchBox({ variant, onSelect, onBack, autoFocus = false }: SearchBoxProps) {
-  const { query, setQuery, state, retry, reset } = useSearch()
+export function SearchBox({
+  variant,
+  onSelect,
+  onBack,
+  autoFocus = false,
+  mapCenter,
+}: SearchBoxProps) {
+  const { query, setQuery, state, retry, reset } = useSearch({ mapCenter })
   const [active, setActive] = useState<number>(-1)
   const inputRef = useRef<HTMLInputElement>(null)
   const listId = useId()
 
   const results: SearchResult[] =
     state.kind === 'results' ? state.results : state.kind === 'loading' ? state.previous : []
+  // 보이는 목록을 만든 중심. 로딩 중에는 이전 목록이 보이므로 그 목록의 중심이 맞다.
+  const center: Point | null =
+    state.kind === 'results' ? state.center : state.kind === 'loading' ? state.previousCenter : null
   const expanded = results.length > 0
 
   useEffect(() => {
@@ -153,8 +171,17 @@ export function SearchBox({ variant, onSelect, onBack, autoFocus = false }: Sear
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(result)}
             >
-              <span className={styles.optionName}>{result.name}</span>
-              {result.address !== '' && <span className={styles.optionAddress}>{result.address}</span>}
+              <span className={styles.optionText}>
+                <span className={styles.optionName}>{result.name}</span>
+                {result.address !== '' && (
+                  <span className={styles.optionAddress}>{result.address}</span>
+                )}
+              </span>
+              {center !== null && (
+                <span className={styles.optionDistance}>
+                  {distanceText(distanceMeters(center, result))}
+                </span>
+              )}
             </li>
           ))}
         </ul>

@@ -7,18 +7,21 @@
 
 import type { SearchResult } from '../../api/client'
 import { ko } from '../../copy/ko'
+import type { Point } from '../../coords'
 import styles from './Search.module.css'
 import { SearchBox } from './SearchBox'
 
 export interface SearchOverlayProps {
   onSelect: (result: SearchResult) => void
   onBack: () => void
+  /** 지금 지도 중심 (v2.5 4-4). 오버레이 뒤에 지도가 그대로 있으므로 그 중심을 쓴다. */
+  mapCenter?: () => Point | null
 }
 
-export function SearchOverlay({ onSelect, onBack }: SearchOverlayProps) {
+export function SearchOverlay({ onSelect, onBack, mapCenter }: SearchOverlayProps) {
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-label={ko.search.inputLabel}>
-      <SearchBox variant="overlay" onSelect={onSelect} onBack={onBack} autoFocus />
+      <SearchBox variant="overlay" onSelect={onSelect} onBack={onBack} autoFocus mapCenter={mapCenter} />
     </div>
   )
 }

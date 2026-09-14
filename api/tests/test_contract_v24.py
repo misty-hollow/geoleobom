@@ -182,10 +182,17 @@ def test_out_of_contract_signals_are_not_product_errors():
 
 
 def test_route_takes_only_three_query_parameters():
-    """v2.4는 요청 파라미터를 늘리지 않았다 (부록 F)."""
+    """`/route`는 계속 셋뿐이다 (v2.4 부록 F).
+
+    `/search`는 **v2.5 부록 G가 선택 지도 중심을 더했다** — `q`는 필수 그대로이고
+    `lon`·`lat`는 선택이다. 그 계약은 tests/test_search_endpoint.py가 지킨다.
+    """
     spec = client.get("/openapi.json").json()["paths"]
     assert {p["name"] for p in spec["/api/route"]["get"]["parameters"]} == {"lon", "lat", "fid"}
-    assert {p["name"] for p in spec["/api/search"]["get"]["parameters"]} == {"q"}
+    search_params = spec["/api/search"]["get"]["parameters"]
+    assert {p["name"] for p in search_params} == {"q", "lon", "lat"}
+    required = {p["name"] for p in search_params if p.get("required")}
+    assert required == {"q"}
 
 
 def test_route_fid_error_message_carries_no_coordinates():

@@ -47,6 +47,11 @@ from app.settings import load_settings
 ANALYSIS_UNAVAILABLE = "analysis data or OSRM is not configured"
 SEARCH_UNAVAILABLE = "search is not configured"
 SEARCH_UPSTREAM_FAILED = "search upstream failed"
+# v2.5 4-4: 지도 중심 `lon`·`lat`는 둘 다 있거나 둘 다 없어야 한다. 한쪽만 오면 422다.
+# 문구는 **고정 문자열**이다 — 받은 좌표나 검색어를 되비추지 않는다(5절). FastAPI 기본
+# 422 body는 잘못된 입력값을 `input`에 담아 되돌려주므로 그 경로를 쓰지 않는다.
+SEARCH_CENTER_INCOMPLETE = "map centre requires both lon and lat"
+SEARCH_CENTER_OUT_OF_RANGE = "map centre is out of range"
 ROUTE_FID_NOT_FOUND = "fid is not part of the current analysis for this location"
 
 
@@ -155,16 +160,26 @@ def route(
 
 
 @app.get("/api/search", response_model=list[SearchResult])
-async def search(q: str = Query(..., min_length=1, max_length=100)) -> list[SearchResult]:
-    """카카오 로컬 검색 프록시 (v2.4 4-4).
+async def search(
+    q: str = Query(..., min_length=1, max_length=100),
+    lon: float | None = Query(None),
+    lat: float | None = Query(None),
+) -> list[SearchResult]:
+    """카카오 로컬 검색 프록시 (v2.4 4-4, v2.5 4-4).
 
     **검색어를 서버에 저장하거나 캐시하지 않는다**(4-4, 5절). 실패 처리도 4-4대로다 —
     카카오 timeout은 기존 `TIMEOUT`(504), 그 밖의 카카오 실패는 계약 밖 HTTP 실패(502).
     새 제품 오류 코드를 만들지 않는다.
+
+    `lon`·`lat`는 **현재 지도 중심**이며 선택이다(v2.5 4-4). 둘 다 없으면 v2.4와 같은
+    동작이고, 있으면 키워드 갈래에만 위치 bias로 실린다(adapter 맨 위). 한쪽만 오면
+    제품 오류 코드를 만들지 않고 **계약 밖 422**다. 응답 모양은 어느 경우에도 같다 —
+    `name`·`address`·`lon`·`lat` 넷이며 거리 필드를 더하지 않는다.
     """
+    center = _search_center(lon, lat)
     client = await get_search_client()
     try:
-        hits = await client.search(q)
+        hits = await client.search(q, center=center)
     except UpstreamTimeout as exc:
         raise ProductError("TIMEOUT", "검색을 끝내지 못했습니다") from exc
     except KakaoUnavailable as exc:
@@ -174,6 +189,22 @@ async def search(q: str = Query(..., min_length=1, max_length=100)) -> list[Sear
     return [
         SearchResult(name=hit.name, address=hit.address, lon=hit.lon, lat=hit.lat) for hit in hits
     ]
+
+
+def _search_center(lon: float | None, lat: float | None) -> tuple[float, float] | None:
+    """`/api/search`의 선택 지도 중심을 읽는다 (v2.5 4-4).
+
+    **둘 다 또는 둘 다 없음**이다. 한쪽만 오면 422이며, 좌표 범위를 벗어난 값도 같다.
+    어느 경우에도 오류 문구에 받은 값을 넣지 않는다 — 지도 중심은 좌표 원문과 같은
+    개인정보 규칙을 따른다(5절).
+    """
+    if lon is None and lat is None:
+        return None
+    if lon is None or lat is None:
+        raise HTTPException(status_code=422, detail=SEARCH_CENTER_INCOMPLETE)
+    if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+        raise HTTPException(status_code=422, detail=SEARCH_CENTER_OUT_OF_RANGE)
+    return lon, lat
 
 
 def _metrics(request: Request) -> RequestMetrics | None:

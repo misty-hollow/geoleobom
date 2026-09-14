@@ -561,7 +561,7 @@ export function MapPage() {
       <div className={layoutStyles.desktop}>
         <aside className={layoutStyles.panel} aria-label={ko.sheet.resultLabel}>
           <div className={layoutStyles.panelSearch}>
-            <SearchBox variant="inline" onSelect={goToSearchResult} />
+            <SearchBox variant="inline" onSelect={goToSearchResult} mapCenter={map.center} />
           </div>
           <div className={layoutStyles.panelBody}>{panelBody()}</div>
           <div className={layoutStyles.panelBar}>
@@ -607,7 +607,9 @@ export function MapPage() {
       <Sheet snap={snap} onSnapChange={setSnap} onHeightChange={onSheetHeight} label={ko.sheet.resultLabel}>
         {sheetContent()}
       </Sheet>
-      {isSearch && <SearchOverlay onSelect={goToSearchResult} onBack={() => navigate(-1)} />}
+      {isSearch && (
+        <SearchOverlay onSelect={goToSearchResult} onBack={() => navigate(-1)} mapCenter={map.center} />
+      )}
       {dialogs}
     </div>
   )
