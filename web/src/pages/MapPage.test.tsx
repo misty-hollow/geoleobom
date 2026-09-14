@@ -10,6 +10,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 import { DATA_UPDATED_NOTICE, METHOD_NOTICE } from '../format'
+import { ko } from '../copy/ko'
 import { resetAnalysisCacheForTests } from '../hooks/useAnalysis'
 import { resetKakaoSdkForTests } from '../kakao/useKakaoMap'
 import { STORAGE_KEY } from '../storage'
@@ -200,9 +201,10 @@ describe('MapPage', () => {
     fireEvent.click(row)
     await waitFor(() => expect(fake.calls.polylineCreated).toBe(2))
     expect(row.getAttribute('aria-expanded')).toBe('true')
-    // 시트 배치: 경로 bounds 패딩은 상단바 72 + 24, 하단 half 385 + 24 (DESIGN.md 7절).
+    // 시트 배치: 경로 bounds 패딩은 상단바 72 + 여백 24 + 핀 높이 40, 하단 half 385 + 24
+    // (DESIGN.md 7절·7-2 — 핀은 좌표에서 위로 40px 자라므로 그 높이도 상단에 실어야 머리가 잘리지 않는다).
     const [, boundsTop, , boundsBottom] = fake.calls.setBounds[fake.calls.setBounds.length - 1]
-    expect([boundsTop, boundsBottom]).toEqual([96, 409])
+    expect([boundsTop, boundsBottom]).toEqual([136, 409])
     const item = row.closest('li')!
     expect(within(item).getByText('경로 표시 중')).toBeTruthy()
     expect(within(item).getByText('가장 가까움')).toBeTruthy()
@@ -216,6 +218,163 @@ describe('MapPage', () => {
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('false')
     expect(fake.polylines.every((p) => p.map === null)).toBe(true)
+  })
+
+  /**
+   * 경로 UX end-to-end (DESIGN.md 7-2 fit 상태 머신, 11절 RoutePanel).
+   *
+   * 관찰 대상은 **지도가 실제로 움직였는가**다 — `setBounds`(배율 포함 fit)·`panTo`
+   * (배율 유지 이동)·`setCenter`(즉시 이동)를 센다. "스냅이 바뀌었다"나 "행이 열렸다"
+   * 같은 화면 상태로는 이 규칙을 판정할 수 없다.
+   */
+  describe('경로 UX (DESIGN.md 7-2 · 11)', () => {
+    /** 지금까지의 프로그램 이동 횟수. */
+    function moves() {
+      return {
+        bounds: fake.calls.setBounds.length,
+        panTo: fake.calls.panTo.length,
+        center: fake.calls.setCenter.length,
+      }
+    }
+
+    /** fid마다 다른 곳으로 가는 경로. 202는 화면 밖으로 한참 나간다. */
+    function routeHandler(url: URL) {
+      if (url.pathname !== '/api/route') return jsonResponse(typicalAnalysis())
+      const fid = Number(url.searchParams.get('fid'))
+      const base = routeFor(fid)
+      if (fid !== 202) return jsonResponse(base)
+      return jsonResponse({
+        ...base,
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [127.1402, 36.4713],
+            [127.1462, 36.4713],
+          ],
+        },
+        snapped_dest: { lon: 127.1462, lat: 36.4713, snap_distance_m: 3.1 },
+      })
+    }
+
+    async function shownRoute() {
+      handler = routeHandler
+      renderAt('/p/36.47130,127.14020')
+      await screen.findByText(METHOD_NOTICE)
+      await waitFor(() => expect(fake.lastMap).not.toBeNull())
+      fake.setViewport(390, 844)
+      fireEvent.click(screen.getByRole('button', { name: /마트·슈퍼/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(2))
+      return screen.getByRole('button', { name: /마트·슈퍼/ })
+    }
+
+    it('첫 표시는 fit이고, 다른 시설로 바꿀 때는 자동 확대하지 않는다', async () => {
+      await shownRoute()
+      const afterFirst = moves()
+      expect(afterFirst.bounds, '첫 표시가 fit이 아니다').toBeGreaterThan(0)
+      const level = fake.lastMap!.getLevel()
+
+      // 가까운 다른 시설 — 이미 보이는 범위라 지도는 움직이지 않는다(7-2 ①).
+      fireEvent.click(screen.getByRole('button', { name: /신관시장 농협하나로마트/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(4))
+      expect(moves()).toEqual(afterFirst)
+      expect(fake.lastMap!.getLevel(), '시설 전환이 배율을 바꿨다').toBe(level)
+    })
+
+    it('현재 배율로 들어갈 수 없는 경로에서만 축소하고, 짧은 경로로 돌아와도 다시 확대하지 않는다', async () => {
+      await shownRoute()
+      const level = fake.lastMap!.getLevel()
+
+      // 화면 밖으로 한참 나가는 경로 — 지금 배율로는 들어갈 수 없다(7-2 ③).
+      fireEvent.click(screen.getByRole('button', { name: /GS더프레시 공주점/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(4))
+      await waitFor(() => expect(fake.lastMap!.getLevel()).toBeGreaterThan(level))
+      const zoomedOut = fake.lastMap!.getLevel()
+
+      // 다시 짧은 경로로. **자동 확대는 없다** — "긴 경로 뒤 짧은 경로는 작게 보인다"가
+      // DESIGN.md 7-2가 기록한 트레이드오프다(원래 불만이 "줌이 튄다"였다).
+      fireEvent.click(screen.getByRole('button', { name: /신관시장 농협하나로마트/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(6))
+      expect(fake.lastMap!.getLevel(), '짧은 경로로 돌아가며 자동 확대했다').toBe(zoomedOut)
+    })
+
+    it('× 로 닫으면 선·링만 사라지고 중심·배율은 그대로다', async () => {
+      await shownRoute()
+      // 시트를 peek으로 내리면 RoutePanel이 나온다(11절: half·full은 확장 행이 말한다).
+      fireEvent.keyDown(screen.getByRole('button', { name: ko.sheet.handle }), { key: 'ArrowDown' })
+      const close = await screen.findByRole('button', { name: ko.route.close })
+      // 화면에 "경로 닫기" **텍스트 노드**를 만들지 않는다(DESIGN.md 9·11절).
+      expect(close.textContent).toBe('')
+      expect(screen.queryByText(ko.route.close)).toBeNull()
+
+      const before = moves()
+      const center = fake.lastMap!.getCenter()
+      const level = fake.lastMap!.getLevel()
+      fireEvent.click(close)
+      await waitFor(() => expect(fake.polylines.every((line) => line.map === null)).toBe(true))
+      expect(moves(), '닫기가 지도를 움직였다').toEqual(before)
+      expect(fake.lastMap!.getCenter()).toBe(center)
+      expect(fake.lastMap!.getLevel()).toBe(level)
+    })
+
+    it('시트 스냅을 바꿔도 지도는 움직이지 않는다', async () => {
+      await shownRoute()
+      const before = moves()
+      const handle = screen.getByRole('button', { name: ko.sheet.handle })
+      fireEvent.keyDown(handle, { key: 'ArrowDown' })
+      await waitFor(() =>
+        expect(document.querySelector('section[data-snap]')?.getAttribute('data-snap')).toBe('peek'),
+      )
+      fireEvent.keyDown(handle, { key: 'ArrowUp' })
+      await waitFor(() =>
+        expect(document.querySelector('section[data-snap]')?.getAttribute('data-snap')).toBe('half'),
+      )
+      expect(moves(), '스냅 변화가 지도를 움직였다').toEqual(before)
+    })
+
+    it('사용자가 직접 확대한 뒤에는 그 배율을 지킨다', async () => {
+      await shownRoute()
+      // 사용자가 휠·핀치로 확대했다: 배율이 우리가 만든 값과 다른 값이 되고 이벤트가 온다.
+      const level = fake.lastMap!.getLevel() - 1
+      act(() => {
+        fake.lastMap!.setLevel(level)
+        fake.maps.event.trigger(fake.lastMap!, 'zoom_changed')
+      })
+      const before = moves()
+
+      // 가까운 다른 시설. 목적지가 보이는 한 움직이지 않고, 움직이더라도 pan까지다.
+      fireEvent.click(screen.getByRole('button', { name: /신관시장 농협하나로마트/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(4))
+      expect(fake.calls.setBounds.length, '사용자가 잡아둔 배율을 버리고 다시 fit했다').toBe(before.bounds)
+      expect(fake.lastMap!.getLevel()).toBe(level)
+    })
+
+    it('/route 404로 경로를 지울 때도 중심·배율을 유지한다', async () => {
+      await shownRoute()
+      const before = moves()
+      const center = fake.lastMap!.getCenter()
+      const level = fake.lastMap!.getLevel()
+      handler = (url) =>
+        url.pathname === '/api/route'
+          ? jsonResponse({ detail: 'not found' }, 404)
+          : jsonResponse(typicalAnalysis())
+      fireEvent.click(screen.getByRole('button', { name: /편의점/ }))
+      await screen.findByText(DATA_UPDATED_NOTICE)
+      await waitFor(() => expect(fake.polylines.every((line) => line.map === null)).toBe(true))
+      expect(moves(), '경로 제거가 지도를 움직였다').toEqual(before)
+      expect(fake.lastMap!.getCenter()).toBe(center)
+      expect(fake.lastMap!.getLevel()).toBe(level)
+    })
+
+    it('RoutePanel은 태그·시설명·시간·거리를 보이고 닫기는 aria-label만 쓴다', async () => {
+      await shownRoute()
+      fireEvent.keyDown(screen.getByRole('button', { name: ko.sheet.handle }), { key: 'ArrowDown' })
+      const close = await screen.findByRole('button', { name: ko.route.close })
+      const panel = close.closest('div')!.parentElement!
+      expect(within(panel).getByText(ko.row.routeShown)).toBeTruthy()
+      expect(within(panel).getByText(/마트·슈퍼 · 하나로마트 신관점/)).toBeTruthy()
+      expect(within(panel).getByText('7')).toBeTruthy() // 420초 → 7분
+      expect(within(panel).getByText('480m')).toBeTruthy()
+    })
   })
 
   it('지도 인스턴스는 / ↔ /search ↔ /p 이동에도 하나다. 검색 선택 → replace 이동 + 임시 라벨', async () => {

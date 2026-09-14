@@ -269,7 +269,21 @@ export interface RoutePanelProps {
   pinned?: boolean
 }
 
-/** 값은 `/api/route` 응답의 `walk_seconds`·`walk_m`이다(설계 v1 D-2 화면 4). */
+/**
+ * 값은 `/api/route` 응답의 `walk_seconds`·`walk_m`이다(설계 v1 D-2 화면 4).
+ *
+ * DESIGN.md 11절 RoutePanel:
+ *   1줄 태그 `경로 표시 중` → 12px 링(aria-hidden) → `{카테고리} · {시설명}`
+ *   2줄 `{분}분` + 거리(우회면 `직선 n m · 도보 m m`)
+ *   닫기 **× 아이콘 44×44**. 화면에 "경로 닫기" 텍스트 노드를 만들지 않는다 —
+ *   그 문구는 `aria-label`(데스크톱 `title`)로만 남는다(DESIGN.md 9절).
+ *
+ * 링은 지도 목적지 마커와 **같은 형태**다. "링 = 이 시설"이 패널과 지도를 잇는 기호이며,
+ * 그래서 지도 위에는 시설명 텍스트를 따로 그리지 않는다(7-1).
+ *
+ * 경로가 바뀌면 내용이 통째로 교체된다. 스크린리더가 그 교체를 읽도록 바깥을
+ * `role="status"`로 두고, 안쪽 문구에는 다시 `role`을 주지 않는다(두 번 읽힌다).
+ */
 export function RoutePanel({ state, analysis, onClose, onRetry, pinned = false }: RoutePanelProps) {
   const wrap = pinned ? `${styles.routePanel} ${styles.routePanelPinned}` : `${styles.peek} ${styles.routePanel}`
   if (state.kind === 'none') return null
@@ -291,19 +305,24 @@ export function RoutePanel({ state, analysis, onClose, onRetry, pinned = false }
 
   return (
     <div className={wrap}>
-      <div>
-        <p className={styles.routeTitle}>{title}</p>
+      {/* 교체 애니메이션은 `--dur-fade` 120. reduced-motion은 base.css가 0으로 만든다. */}
+      <div className={styles.routeBody} role="status" key={`${state.target.category}-${state.target.fid}`}>
+        <p className={styles.routeTitleRow}>
+          {state.kind !== 'failed' && (
+            <span className={styles.tag}>
+              {state.kind === 'loading' ? ko.row.routeLoading : ko.row.routeShown}
+            </span>
+          )}
+          <span className={styles.routeRing} aria-hidden="true" />
+          <span className={styles.routeTitle}>{title}</span>
+        </p>
         {state.kind === 'loading' && (
-          <p className={styles.routeText} role="status">
+          <p className={styles.routeText}>
             <Spinner />
             {ko.loading.route}
           </p>
         )}
-        {state.kind === 'failed' && (
-          <p className={styles.routeText} role="status">
-            {ko.route.failed}
-          </p>
-        )}
+        {state.kind === 'failed' && <p className={styles.routeText}>{ko.route.failed}</p>}
         {state.kind === 'shown' && (
           <p className={styles.routeValue}>
             <span className={styles.routeMinutes}>
@@ -326,8 +345,8 @@ export function RoutePanel({ state, analysis, onClose, onRetry, pinned = false }
             {ko.route.retry}
           </Button>
         )}
-        <Button variant="text" onClick={onClose}>
-          {ko.route.close}
+        <Button variant="icon" aria-label={ko.route.close} title={ko.route.close} onClick={onClose}>
+          <Icon name="close" />
         </Button>
       </div>
     </div>

@@ -610,7 +610,7 @@ async function main() {
       await page.keyboard.press('ArrowDown')
       await page.waitForTimeout(400)
       s = await m()
-      check(`${vp.name}: peek — RoutePanel + 경로선 전부 보임`, s.sheet.snap === 'peek' && s.route !== null && s.route.b <= s.sheet.y && (await page.$('text=경로 닫기')) !== null, `sheetTop=${rnd(s.sheet.y)} route.bottom=${rnd(s.route?.b)}`)
+      check(`${vp.name}: peek — RoutePanel + 경로선 전부 보임`, s.sheet.snap === 'peek' && s.route !== null && s.route.b <= s.sheet.y && (await page.$('button[aria-label="경로 닫기"]')) !== null, `sheetTop=${rnd(s.sheet.y)} route.bottom=${rnd(s.route?.b)}`)
       check(`${vp.name}: peek — 지도 usable 높이 ≥ 60%`, (s.sheet.y - s.topbar.b) / vp.height >= 0.6, `${rnd(((s.sheet.y - s.topbar.b) / vp.height) * 100)}%`)
       await shot(page, `${vp.name}-09-route-peek`)
       await page.keyboard.press('ArrowUp')
