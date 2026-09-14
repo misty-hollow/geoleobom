@@ -1,9 +1,10 @@
 # 걸어봄 (geoleobom)
 
 위치 하나를 넣으면 생활시설까지 **실제 보행망 기준** 예상 도보시간을 보여주고, 후보를 4곳까지 담아 비교·공유하는 웹앱.
-제품 범위와 기술 스택은 `docs/걸어봄_확정설계_v2.4.md`가 기준이다.
+제품 범위와 기술 스택은 `docs/걸어봄_확정설계_v2.5.md`가 기준이다.
 
-- 확정 설계: `docs/걸어봄_확정설계_v2.4.md` (동결. **현재 단일 기준**)
+- 확정 설계: `docs/걸어봄_확정설계_v2.5.md` (동결. **현재 단일 기준**)
+- 확정 설계 v2.4: `docs/걸어봄_확정설계_v2.4.md` (동결 이력. v2.4→v2.5 차이는 v2.5 부록 G)
 - 확정 설계 v2.3: `docs/걸어봄_확정설계_v2.3.md` (동결 이력. v2.3→v2.4 차이는 v2.4 부록 F)
 - 확정 설계 v2.2: `docs/걸어봄_확정설계_v2.2.md` (동결 이력. v2.2→v2.3 차이는 v2.3 부록 E)
 - 확정 설계 v2.1: `docs/걸어봄_확정설계_v2.1.md` (동결 원본. 이력 문서)
@@ -25,7 +26,7 @@ data/          원본 3종 ingest 파이프라인, POI GeoPackage 생성·검증
                의존성), 지원 폴리곤 생성, 게이트 2 품질 측정, OSRM 그래프 빌드
 data/region_data/  POI 수집 폴리곤 (지원 경계 + 3km, v2.3 1-3). 지원 판정 폴리곤은
                    api/app/region_data/ 에 있고 서버 이미지에 실린다
-docs/          확정설계 v2.4(현재)·v2.3·v2.2·v2.1(이력) + 개발운영가이드 v1
+docs/          확정설계 v2.5(현재)·v2.4·v2.3·v2.2·v2.1(이력) + 개발운영가이드 v1
 deploy/        배포 파일 (compose.yaml: caddy·osrm·api, Caddyfile,
                deploy_api.sh·deploy_web.sh·deploy_data.sh·rollback.sh,
                smoke.py·loadtest.py·measure_flow.py)

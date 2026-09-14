@@ -21,7 +21,7 @@ from app.settings import Settings
 
 client = TestClient(app)
 
-DESIGN = Path(__file__).resolve().parents[2] / "docs" / "걸어봄_확정설계_v2.4.md"
+DESIGN = Path(__file__).resolve().parents[2] / "docs" / "걸어봄_확정설계_v2.5.md"
 
 
 def _schemas() -> dict:
@@ -229,14 +229,17 @@ def test_search_readiness_does_not_depend_on_analysis_readiness():
 
 
 def test_the_design_document_is_the_current_frozen_one():
-    """PROJECT.md 1절이 가리키는 문서가 실제로 있고 v2.4를 선언하는가."""
-    assert DESIGN.exists(), "현재 확정설계 v2.4 원문이 있어야 한다"
+    """PROJECT.md 1절이 가리키는 문서가 실제로 있고 v2.5를 선언하는가.
+
+    v2.4의 `/route` 규약은 v2.5에 그대로 있다(v2.5는 검색·현위치만 더했다, 부록 G).
+    """
+    assert DESIGN.exists(), "현재 확정설계 v2.5 원문이 있어야 한다"
     head = DESIGN.read_text(encoding="utf-8")[:400]
-    assert "확정 설계 v2.4" in head
+    assert "확정 설계 v2.5" in head
 
     project = (DESIGN.parents[1] / "PROJECT.md").read_text(encoding="utf-8")
-    assert "docs/걸어봄_확정설계_v2.4.md" in project
-    assert "현재 확정설계 v2.4 원문이 유일한 규약 원문" in project
+    assert "docs/걸어봄_확정설계_v2.5.md" in project
+    assert "현재 확정설계 v2.5 원문이 유일한 규약 원문" in project
 
 
 def test_the_design_document_records_the_poi_date_wording():
