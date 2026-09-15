@@ -13,11 +13,13 @@ import {
   DATA_UPDATED_NOTICE,
   DENSITY_CAPPED_LABEL,
   detourText,
+  distanceText,
   metersText,
   minutesParts,
   minutesText,
   poiDateLabel,
 } from '../../format'
+import { ACCURACY_WARN_M } from '../../hooks/useCurrentLocation'
 import type { RouteState } from '../../hooks/useRoute'
 import {
   DENSITY_INCOMPLETE,
@@ -239,9 +241,36 @@ export function LoadingStrip() {
 
 // --- PendingBar / HintStrip -----------------------------------------------
 
-export function PendingBar({ point, onAnalyze }: { point: Point; onAnalyze: () => void }) {
+/**
+ * 현위치 오차 경고 줄 (DESIGN.md 24절 inaccurate).
+ *
+ * `accuracy > 200m`일 때만 PendingBar **위**에 붙는다. 거리는 22절 표기를 그대로 쓴다 —
+ * 데스크톱·Wi-Fi 추정은 2,000~5,000m로 오므로 `3.5km`처럼 읽혀야 한다. 정확도 원은
+ * 그리지 않는다(24절: 장식·"파란 원 = 나" 관습 회피).
+ */
+export function AccuracyWarning({ accuracyM }: { accuracyM: number | null }) {
+  if (accuracyM === null || accuracyM <= ACCURACY_WARN_M) return null
+  return (
+    <p className={styles.warnBand} role="status">
+      <Icon name="snap" size={16} />
+      <span>{ko.locate.inaccurate(distanceText(accuracyM))}</span>
+    </p>
+  )
+}
+
+export function PendingBar({
+  point,
+  onAnalyze,
+  accuracyM = null,
+}: {
+  point: Point
+  onAnalyze: () => void
+  /** 현위치에서 온 pending이면 브라우저가 말한 반경(m). 그 밖에는 `null`이다. */
+  accuracyM?: number | null
+}) {
   return (
     <div className={styles.peek}>
+      <AccuracyWarning accuracyM={accuracyM} />
       <p className={styles.pendingCoord}>
         <span>{ko.pending.label}</span>
         <span aria-hidden="true">·</span>

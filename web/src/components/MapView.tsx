@@ -6,6 +6,7 @@
  */
 
 import { ko } from '../copy/ko'
+import type { LocationStatus } from '../hooks/useCurrentLocation'
 import type { MapController, MapStatus } from '../kakao/useKakaoMap'
 import { Button, Spinner } from '../ui/Button'
 import { Icon } from '../ui/Icon'
@@ -19,9 +20,27 @@ export interface MapViewProps {
   showZoom: boolean
   showRecenter: boolean
   onRecenter: () => void
+  /**
+   * 현위치 (DESIGN.md 24절). `null`이면 버튼 자체를 두지 않는다 —
+   * `navigator.geolocation`이 없는 브라우저가 그 경우다("unavailable → 버튼 숨김").
+   */
+  locate: LocateControl | null
 }
 
-export function MapView({ status, map, bottomInset, showZoom, showRecenter, onRecenter }: MapViewProps) {
+export interface LocateControl {
+  status: LocationStatus
+  onLocate: () => void
+}
+
+export function MapView({
+  status,
+  map,
+  bottomInset,
+  showZoom,
+  showRecenter,
+  onRecenter,
+  locate,
+}: MapViewProps) {
   return (
     <div className={styles.mapWrap} style={{ ['--sheet-inset' as string]: `${bottomInset}px` }}>
       {/*
@@ -53,8 +72,25 @@ export function MapView({ status, map, bottomInset, showZoom, showRecenter, onRe
         </div>
       )}
 
-      {status === 'ready' && (showZoom || showRecenter) && (
+      {status === 'ready' && (showZoom || showRecenter || locate !== null) && (
         <div className={styles.mapControls}>
+          {/*
+            24절: 현위치는 컨트롤 스택 **첫 자리**이고 데스크톱에서는 ± 위다. DOM 순서가
+            곧 시각 순서이자 포커스 순서라(19절), 이 자리가 "검색바 → 후보 → 현위치 →
+            (리센터) → 시트"를 만든다.
+          */}
+          {locate !== null && (
+            <Button
+              variant="floating"
+              className={locate.status === 'denied' ? styles.locateMuted : undefined}
+              aria-label={ko.locate.label}
+              disabled={locate.status === 'loading'}
+              onClick={locate.onLocate}
+            >
+              {locate.status === 'loading' ? <Spinner /> : <Icon name="locate" />}
+            </Button>
+          )}
+          {locate?.status === 'loading' && <p className="sr-only" role="status">{ko.locate.loading}</p>}
           {showRecenter && (
             <Button variant="floating" aria-label={ko.map.recenter} onClick={onRecenter}>
               <Icon name="recenter" />

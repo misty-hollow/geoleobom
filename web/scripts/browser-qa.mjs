@@ -737,6 +737,75 @@ async function main() {
     check(`${vp.name}: 세션 장소명이 저장 계층에 남지 않는다`, leaked.leaked === false, leaked.all)
     await page.evaluate(() => localStorage.clear())
 
+    // --- 현위치 (DESIGN.md 24절) ---
+    //
+    // Playwright의 **가상 geolocation·권한**으로 본다. 실기기 GPS 검증이 아니라
+    // 브라우저 API 통합 검증이다 — iOS Safari·Android Chrome의 실제 동작은 여기서 알 수 없다.
+    // 좌표는 공주대 부근 합성값이며 사람의 실제 위치가 아니다.
+    // 위도 5번째 자리가 mock의 상태 주입 스위치다(…0이 전형). 현위치 흐름을 보려는 것이지
+    // 오류 화면을 보려는 것이 아니므로 …0으로 둔다.
+    const LOCATE = { longitude: 127.14560, latitude: 36.47320 }
+
+    // 1) 권한을 주지 않은 상태로 열어도 **진입만으로는 아무 일도 없어야 한다**.
+    await context.clearPermissions()
+    await page.goto(BASE + '/')
+    // 컨트롤은 지도가 ready가 된 뒤에 그려진다. host 요소만 기다리면 그 전에 재 버린다.
+    await page.waitForSelector('button[aria-label="현위치"]')
+    const locateBox = await page.evaluate(() => {
+      const button = document.querySelector('button[aria-label="현위치"]')
+      if (button === null) return null
+      const rect = button.getBoundingClientRect()
+      const stack = button.parentElement
+      const order = Array.from(stack.querySelectorAll('button')).map((b) => b.getAttribute('aria-label'))
+      return { w: Math.round(rect.width), h: Math.round(rect.height), right: Math.round(rect.right), bottom: Math.round(rect.bottom), order, inner: window.innerWidth, innerH: window.innerHeight }
+    })
+    check(`${vp.name}: 현위치 버튼 44×44`, locateBox !== null && locateBox.w >= 44 && locateBox.h >= 44, JSON.stringify(locateBox))
+    check(
+      `${vp.name}: 컨트롤 스택 첫 자리(± 위)`,
+      locateBox !== null && locateBox.order[0] === '현위치' && (!locateBox.order.includes('확대') || locateBox.order.indexOf('현위치') < locateBox.order.indexOf('확대')),
+      JSON.stringify(locateBox?.order),
+    )
+    check(`${vp.name}: 현위치 버튼이 화면 안에 있다`, locateBox !== null && locateBox.right <= locateBox.inner && locateBox.bottom <= locateBox.innerH, JSON.stringify(locateBox))
+
+    // 2) 권한 허용 → pending. **분석도 URL 이동도 없다.**
+    await context.grantPermissions(['geolocation'], { origin: BASE })
+    await context.setGeolocation(LOCATE)
+    await page.click('button[aria-label="현위치"]')
+    await page.waitForSelector('text=여기 분석')
+    check(`${vp.name}: 현위치 성공 → pending(URL 불변)`, new URL(page.url()).pathname === '/', page.url())
+    const leakedAfterLocate = await page.evaluate(() => {
+      const parts = [JSON.stringify(history.state ?? null), location.href]
+      for (const store of [localStorage, sessionStorage]) {
+        for (let i = 0; i < store.length; i += 1) parts.push(`${store.key(i)}=${store.getItem(store.key(i))}`)
+      }
+      return parts.join('|')
+    })
+    check(`${vp.name}: 확정 전 좌표가 저장 계층에 없다`, !leakedAfterLocate.includes('127.14560') && !leakedAfterLocate.includes('36.47320'), leakedAfterLocate.slice(0, 160))
+    await shot(page, `${vp.name}-18-locate-pending`)
+
+    // 3) 오차가 크면 경고 줄(§22 표기).
+    await context.setGeolocation({ ...LOCATE, accuracy: 3500 })
+    await page.click('button[aria-label="현위치"]')
+    await page.waitForSelector('text=핀을 옮겨 정확한 곳을 골라 주세요')
+    const warnText = await page.evaluate(() => Array.from(document.querySelectorAll('p')).map((p) => p.textContent.trim()).find((t) => t.startsWith('위치 오차가')))
+    check(`${vp.name}: 오차 경고 §22 표기`, warnText === '위치 오차가 3.5km예요. 핀을 옮겨 정확한 곳을 골라 주세요', String(warnText))
+    await shot(page, `${vp.name}-19-locate-inaccurate`)
+
+    // 4) `여기 분석`으로만 확정된다.
+    await page.click('button:has-text("여기 분석")')
+    await page.waitForSelector(`text=${METHOD}`)
+    check(`${vp.name}: 확정 후에만 /p 진입`, new URL(page.url()).pathname === '/p/36.47320,127.14560', page.url())
+
+    // 5) 권한 거부 → 토스트. 설정 안내 문구를 덧붙이지 않는다.
+    await context.clearPermissions()
+    await page.goto(BASE + '/')
+    await page.waitForSelector('button[aria-label="현위치"]')
+    await page.click('button[aria-label="현위치"]')
+    await page.waitForSelector('text=위치 권한이 꺼져 있어요. 검색이나 지도로 골라 주세요')
+    check(`${vp.name}: 권한 거부 토스트`, true)
+    await shot(page, `${vp.name}-20-locate-denied`)
+    await page.evaluate(() => localStorage.clear())
+
     // --- 상태 변형 화면 ---
     await page.goto(BASE + P_WARN)
     await page.waitForSelector('text=집계 미완료')

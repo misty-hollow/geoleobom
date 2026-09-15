@@ -33,6 +33,7 @@ import layoutStyles from '../components/Layout.module.css'
 import { MapView } from '../components/MapView'
 import resultStyles from '../components/result/Result.module.css'
 import {
+  AccuracyWarning,
   HintStrip,
   LoadingStrip,
   PendingBar,
@@ -63,6 +64,7 @@ import { CATEGORY_LABEL } from '../format'
 import { toComparePath } from '../geo/compareUrl'
 import { useAnalysis } from '../hooks/useAnalysis'
 import { useCandidates } from '../hooks/useCandidates'
+import { useCurrentLocation } from '../hooks/useCurrentLocation'
 import { useLayoutMode, useMediaQuery, type LayoutMode } from '../hooks/useLayoutMode'
 import { useRoute, type RouteTarget } from '../hooks/useRoute'
 import { useKakaoMap, type MapPin, type RouteFrame } from '../kakao/useKakaoMap'
@@ -115,6 +117,13 @@ export function MapPage() {
   const describe = useDescribePlace()
 
   const [pending, setPending] = useState<Point | null>(null)
+  /**
+   * 지금 pending 핀이 **현위치에서 온 미확정 좌표인가** (DESIGN.md 24절).
+   *
+   * 값이 아니라 표시만 둔다 — 좌표 자체는 `pending` 하나에만 있다. 이 표시가 하는 일은
+   * 두 가지다: 오차 경고 줄(24절 inaccurate)과 **검색 지도 중심 차단**(아래 `searchCenter`).
+   */
+  const [located, setLocated] = useState<{ accuracyM: number } | null>(null)
   // 첫 렌더부터 목적 스냅으로 둔다. 'peek'에서 시작하면 공유 URL 진입마다 peek→half 애니메이션이 보인다(QA 2026-09-12).
   const [snap, setSnap] = useState<SheetSnap>(() => (fixed === null ? 'peek' : 'half'))
   const [expanded, setExpanded] = useState<NearestCategory | null>(null)
@@ -220,6 +229,8 @@ export function MapPage() {
   const onPinPlace = useCallback(
     (point: Point) => {
       setPending(point)
+      // 사용자가 지도에서 새로 고른 지점이다. 현위치에서 온 좌표가 아니다.
+      setLocated(null)
       if (fixedRef.current !== null) navigate('/')
     },
     [navigate],
@@ -427,10 +438,12 @@ export function MapPage() {
 
   const analyzePending = useCallback(() => {
     if (pending === null) return
-    // 지도 탭·드래그로 고른 지점(23절 `pin`). 현위치(24절)도 확정되면 같은 의미다.
+    // 지도 탭·드래그로 고른 지점(23절 `pin`). **현위치도 확정되면 같은 의미다** —
+    // `current-location`·`gps` 같은 출처를 새로 만들지 않는다(24절 마지막 줄).
     places.remember(pending, { source: 'pin' })
     navigate(toPlacePath(pending))
     setPending(null)
+    setLocated(null)
   }, [pending, navigate, places])
 
   /** × ·같은 행 재탭으로 경로를 닫는다. 지도는 그대로 두고 `userMoved`만 끈다(DESIGN.md 7-2). */
@@ -439,6 +452,48 @@ export function MapPage() {
     setExpanded(null)
     map.resetUserMoved()
   }, [route, map])
+
+  /**
+   * 현위치 (DESIGN.md 24절, v2.5 3절).
+   *
+   * 얻은 좌표는 **기존 pending 핀 흐름에 그대로 합류한다.** 분석하지도, `/p`로 옮기지도
+   * 않는다 — 사용자가 보고 필요하면 핀을 옮긴 뒤 `여기 분석`을 눌러야 확정이다.
+   * 지도는 7절 규칙(시트 위 가시영역 세로 중앙)으로 그 핀에 맞춘다. 프로그램 이동이므로
+   * 경로 UX의 `userMoved`를 켜지 않는다(`centerOn`이 그 구분을 이미 한다).
+   */
+  const locate = useCurrentLocation({
+    onSuccess: useCallback(
+      (fix) => {
+        // **여기가 입력 경계다.** 5자리 정규화는 다른 핀 입력과 같은 한 곳에서 한다.
+        const point = normalize(fix.lon, fix.lat)
+        if (point === null) {
+          announcer.toast(ko.locate.unavailable)
+          return
+        }
+        setPending(point)
+        setLocated({ accuracyM: fix.accuracyM })
+        if (fixedRef.current !== null) navigate('/')
+        map.centerOn(point, insetRef.current)
+      },
+      [announcer, map, navigate],
+    ),
+    onDenied: useCallback(() => announcer.toast(ko.locate.denied), [announcer]),
+    onUnavailable: useCallback(() => announcer.toast(ko.locate.unavailable), [announcer]),
+  })
+
+  /**
+   * 검색이 카카오에 줄 지도 중심 (v2.5 4-4) — **미확정 현위치는 내보내지 않는다.**
+   *
+   * 24절은 "획득 좌표는 확정 전까지 서버·localStorage·sessionStorage·URL에 두지 않는다"고
+   * 정했다. 그런데 현위치 성공 뒤 지도는 그 좌표로 옮겨 가 있으므로, 사용자가 아직
+   * `여기 분석`을 누르지 않은 채 검색하면 **지도 중심이라는 이름으로 그 좌표가
+   * `/api/search`에 실린다.** 그 한 경로만 막는다.
+   *
+   * 평소의 지도 중심 검색(Search B)은 그대로다 — 막는 것은 "현위치에서 온 미확정
+   * pending이 떠 있는 동안"뿐이고, 확정하거나 지도를 탭해 다른 지점을 고르면 곧바로
+   * 돌아온다. 그동안의 검색은 v2.4와 같은 bias 없는 검색이다(계약은 lon·lat 선택이다).
+   */
+  const searchCenter = useCallback(() => (located !== null ? null : map.center()), [located, map])
 
   const toggleRow = useCallback(
     (category: NearestCategory) => {
@@ -570,7 +625,7 @@ export function MapPage() {
     if (invalidCoords) return invalidCard()
     if (fixed === null) {
       return pending !== null ? (
-        <PendingBar point={pending} onAnalyze={analyzePending} />
+        <PendingBar point={pending} onAnalyze={analyzePending} accuracyM={located?.accuracyM ?? null} />
       ) : (
         <HintStrip text={ko.hint.empty} />
       )
@@ -599,6 +654,7 @@ export function MapPage() {
     if (fixed === null) {
       return pending !== null ? (
         <div className={layoutStyles.panelPending}>
+          <AccuracyWarning accuracyM={located?.accuracyM ?? null} />
           <p className={layoutStyles.panelPendingCoord}>
             {ko.pending.label} · {formatPoint(pending)}
           </p>
@@ -642,7 +698,7 @@ export function MapPage() {
       <div className={layoutStyles.desktop}>
         <aside className={layoutStyles.panel} aria-label={ko.sheet.resultLabel}>
           <div className={layoutStyles.panelSearch}>
-            <SearchBox variant="inline" onSelect={goToSearchResult} mapCenter={map.center} />
+            <SearchBox variant="inline" onSelect={goToSearchResult} mapCenter={searchCenter} />
           </div>
           <div className={layoutStyles.panelBody}>{panelBody()}</div>
           <div className={layoutStyles.panelBar}>
@@ -665,6 +721,7 @@ export function MapPage() {
             showZoom
             showRecenter={outOfRegion}
             onRecenter={() => onErrorAction('recenter')}
+            locate={locate.supported ? { status: locate.status, onLocate: locate.request } : null}
           />
         </main>
         {dialogs}
@@ -682,6 +739,7 @@ export function MapPage() {
           showZoom={showZoom}
           showRecenter={outOfRegion}
           onRecenter={() => onErrorAction('recenter')}
+          locate={locate.supported ? { status: locate.status, onLocate: locate.request } : null}
         />
       </main>
       <TopBar onOpenSearch={openSearch} candidateCount={candidates.items.length} onOpenCandidates={() => setCandidatesOpen(true)} />
@@ -689,7 +747,7 @@ export function MapPage() {
         {sheetContent()}
       </Sheet>
       {isSearch && (
-        <SearchOverlay onSelect={goToSearchResult} onBack={() => navigate(-1)} mapCenter={map.center} />
+        <SearchOverlay onSelect={goToSearchResult} onBack={() => navigate(-1)} mapCenter={searchCenter} />
       )}
       {dialogs}
     </div>
