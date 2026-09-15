@@ -66,52 +66,29 @@ import { useCandidates } from '../hooks/useCandidates'
 import { useLayoutMode, useMediaQuery, type LayoutMode } from '../hooks/useLayoutMode'
 import { useRoute, type RouteTarget } from '../hooks/useRoute'
 import { useKakaoMap, type MapPin, type RouteFrame } from '../kakao/useKakaoMap'
+import { useDescribePlace, usePlaceLabels } from '../session/placeLabels'
 import type { ErrorAction } from '../status/labels'
 import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { LiveRegion, Toast, useAnnouncer } from '../ui/Toast'
 
 /**
- * 라우터 state에만 사는 임시 정보. 새로고침·공유 진입에서는 없다.
+ * 검색 결과의 **주소**만 화면이 잠깐 기억한다.
  *
- * **검색 명칭·주소는 여기에 넣지 않는다.** `navigate(path, { state })`의 값은
- * react-router가 `history.pushState`로 넘기므로 `history.state.usr`에 실려
- * **새로고침을 넘어 세션 히스토리에 남는다.** v2.4 3절은 "사용자가 선택한 검색 좌표만,
- * 명칭·주소는 저장 안 함"이므로 그것은 저장이고 금지다(Astra finding 1).
- * `origin`은 핀에서 왔는지 검색에서 왔는지만 말하는 값이라 사용자 내용이 아니다.
- */
-interface TransientState {
-  origin?: 'pin' | 'search'
-}
-
-function readTransient(state: unknown): TransientState {
-  if (state === null || typeof state !== 'object') return {}
-  const value = state as Record<string, unknown>
-  const out: TransientState = {}
-  if (value.origin === 'pin' || value.origin === 'search') out.origin = value.origin
-  return out
-}
-
-/** 화면에 잠깐 쓰는 검색 결과 표기. 좌표 키 → 명칭·주소. */
-interface SearchLabel {
-  name: string
-  address: string
-}
-
-/**
- * 메모리에만 두는 표기 보관함.
+ * 장소명과 출처는 세션 보관함(`session/placeLabels`)이 들고 있다. 주소는 23절 세션 표기
+ * 규약의 대상이 **아니라서**(이름과 출처 둘뿐이다) 그 보관함으로 넓히지 않고, 헤더 보조
+ * 줄을 위해 이 화면 안에만 둔다. 저장하지 않는 것은 예전과 같다 — 새로고침하면 사라지고
+ * 그때는 좌표가 올라온다.
  *
- * 저장하지 않으면서도 뒤로가기로 같은 지점에 돌아왔을 때 방금 고른 이름을 그대로
- * 보여주려면 좌표 키로 기억해 둘 곳이 필요하다. `useRef`라 **탭을 닫거나 새로고침하면
- * 함께 사라진다** — 그것이 규약이 요구하는 수명이다. 한 세션의 검색 횟수만큼 자라지
- * 않게 상한을 둔다.
+ * 상한을 두는 이유도 이름 때와 다르다. 이 값은 **지금 보고 있는 한 지점**의 보조 줄에만
+ * 쓰이므로, 오래된 항목이 밀려나도 사용자가 잃는 것이 없다.
  */
-const MAX_REMEMBERED_LABELS = 8
+const MAX_REMEMBERED_ADDRESSES = 8
 
-function rememberLabel(store: Map<string, SearchLabel>, key: string, label: SearchLabel): void {
+function rememberAddress(store: Map<string, string>, key: string, address: string): void {
   store.delete(key) // 다시 넣어 가장 최근으로 만든다
-  store.set(key, label)
-  while (store.size > MAX_REMEMBERED_LABELS) {
+  store.set(key, address)
+  while (store.size > MAX_REMEMBERED_ADDRESSES) {
     const oldest = store.keys().next()
     if (oldest.done === true) break
     store.delete(oldest.value)
@@ -132,9 +109,10 @@ export function MapPage() {
   const fixedKey = fixed === null ? null : pointKey(fixed)
   const fixedRef = useRef<Point | null>(fixed)
   fixedRef.current = fixed
-  const transient = readTransient(location.state)
   // 검색 표기는 메모리에만 둔다(위 주석). 렌더 사이에는 남고 새로고침에는 사라진다.
-  const labelsRef = useRef<Map<string, SearchLabel>>(new Map())
+  const addressesRef = useRef<Map<string, string>>(new Map())
+  const places = usePlaceLabels()
+  const describe = useDescribePlace()
 
   const [pending, setPending] = useState<Point | null>(null)
   // 첫 렌더부터 목적 스냅으로 둔다. 'peek'에서 시작하면 공유 URL 진입마다 peek→half 애니메이션이 보인다(QA 2026-09-12).
@@ -160,6 +138,22 @@ export function MapPage() {
       navigate(toPlacePath(fixed), { replace: true, state: location.state })
     }
   }, [fixed, rawCoords, navigate, location.state])
+
+  /**
+   * **앱을 연 그 좌표**만 `shared`로 적는다 (DESIGN.md 23절 "URL 진입 `{'shared'}`").
+   *
+   * 이 화면이 처음 마운트되는 순간이 곧 "이 주소로 앱이 열렸다"이다. 그 뒤의 이동은
+   * 앱 안에서 일어난 일이라 적지 않는다 — 후보 목록에서 저장해 둔 좌표를 열었을 때
+   * "공유된 위치"라고 **지어내지 않기** 위해서다. 아는 것이 없으면 좌표가 올라온다.
+   *
+   * `rememberIfAbsent`라 이미 이름을 아는 좌표를 덮어쓰지도 않는다.
+   */
+  const enteredRef = useRef(false)
+  useEffect(() => {
+    if (enteredRef.current) return
+    enteredRef.current = true
+    if (fixedRef.current !== null) places.rememberIfAbsent(fixedRef.current, { source: 'shared' })
+  }, [places])
 
   // 데스크톱에는 검색 오버레이 라우트가 없다. 패널 필드가 인라인 listbox를 편다.
   useEffect(() => {
@@ -423,20 +417,21 @@ export function MapPage() {
       const point = normalize(result.lon, result.lat)
       if (point === null) return
       setPending(null)
-      // 명칭·주소는 **메모리에만** 넣는다. 라우터 state로 넘기면 history에 남는다.
-      rememberLabel(labelsRef.current, pointKey(point), { name: result.name, address: result.address })
-      const state: TransientState = { origin: 'search' }
-      navigate(toPlacePath(point), { replace: isSearch, state })
+      // 명칭은 **메모리에만** 넣는다(23절). 라우터 state로 넘기면 history.state에 남는다.
+      places.remember(point, { name: result.name, source: 'search' })
+      if (result.address !== '') rememberAddress(addressesRef.current, pointKey(point), result.address)
+      navigate(toPlacePath(point), { replace: isSearch })
     },
-    [navigate, isSearch],
+    [navigate, isSearch, places],
   )
 
   const analyzePending = useCallback(() => {
     if (pending === null) return
-    const state: TransientState = { origin: 'pin' }
-    navigate(toPlacePath(pending), { state })
+    // 지도 탭·드래그로 고른 지점(23절 `pin`). 현위치(24절)도 확정되면 같은 의미다.
+    places.remember(pending, { source: 'pin' })
+    navigate(toPlacePath(pending))
     setPending(null)
-  }, [pending, navigate])
+  }, [pending, navigate, places])
 
   /** × ·같은 행 재탭으로 경로를 닫는다. 지도는 그대로 두고 `userMoved`만 끈다(DESIGN.md 7-2). */
   const closeRoute = useCallback(() => {
@@ -510,14 +505,15 @@ export function MapPage() {
   }, [layout, navigate])
 
   // --- 헤더 -----------------------------------------------------------------
-  // 표기는 메모리에서만 찾는다. 새로고침·공유 진입이면 없고, 그때는 좌표로 보여준다.
-  const searchLabel = fixedKey === null ? undefined : labelsRef.current.get(fixedKey)
+  // 표기는 세션 보관함에서만 찾는다(23절). 새로고침·공유 진입이면 비어 있고, 그때는
+  // 위 effect가 적어 둔 `shared`가, 그것도 없으면 좌표가 올라온다.
+  const address = fixedKey === null ? undefined : addressesRef.current.get(fixedKey)
   const header: ResultHeaderProps | null =
     fixed === null
       ? null
       : {
-          label: searchLabel?.name ?? (transient.origin === 'pin' ? ko.header.pickedLabel : ko.header.sharedLabel),
-          secondary: searchLabel?.address ? searchLabel.address : formatPoint(fixed),
+          label: describe(fixed).text,
+          secondary: address !== undefined && address !== '' ? address : formatPoint(fixed),
           candidateIndex: candidates.indexOf(fixed),
           saved: candidates.has(fixed),
           onSave,

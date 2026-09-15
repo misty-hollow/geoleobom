@@ -22,6 +22,7 @@ import {
   densityText,
   minutesText,
 } from '../../format'
+import { useDescribePlace } from '../../session/placeLabels'
 import { DENSITY_INCOMPLETE, nearestStatusPresentation } from '../../status/labels'
 import styles from './Compare.module.css'
 
@@ -31,6 +32,7 @@ export type CompareColumnState =
   | { point: Point; kind: 'failed'; error: ApiError }
 
 export function CompareTable({ columns }: { columns: CompareColumnState[] }) {
+  const describe = useDescribePlace()
   const allReady = columns.length > 0 && columns.every((column) => column.kind === 'ready')
   const outcome = allReady
     ? compareColumns(columns.map((column) => (column.kind === 'ready' ? column.data : null)))
@@ -58,6 +60,17 @@ export function CompareTable({ columns }: { columns: CompareColumnState[] }) {
                   aria-label={ko.compare.columnAria(index + 1)}
                 >
                   <span className={styles.headName}>{ko.candidates.item(index + 1)}</span>
+                  {/*
+                    세션 표기(DESIGN.md 23절·14절 후보 헤더). 아는 것이 없으면 이 줄을
+                    비우지 않고 아래 좌표가 그대로 올라온다 — 좌표를 두 번 쓰지 않는다.
+                    14절의 나머지(줄 수·title·열 폭)는 비교표 재설계에서 다룬다.
+                  */}
+                  {(() => {
+                    const shown = describe(column.point)
+                    return shown.kind === 'coords' ? null : (
+                      <span className={styles.headPlace}>{shown.text}</span>
+                    )
+                  })()}
                   <span className={styles.headCoord}>{column.point.latText}</span>
                   <span className={styles.headCoord}>{column.point.lonText}</span>
                 </Link>

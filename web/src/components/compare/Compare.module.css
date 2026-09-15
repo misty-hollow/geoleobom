@@ -77,6 +77,20 @@
   font-weight: var(--w-600);
 }
 
+/*
+ * 세션 표기 한 줄 (DESIGN.md 23·14절 후보 헤더). 이름이 길어도 열 폭을 밀지 않게
+ * 한 줄로 자른다 — 줄 수·`title` 같은 14절의 나머지는 비교표 재설계에서 다룬다.
+ */
+.headPlace {
+  max-width: 100%;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-900);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .headCoord {
   font-size: var(--t-caption);
   line-height: var(--lh-caption);
