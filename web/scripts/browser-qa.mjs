@@ -679,6 +679,64 @@ async function main() {
     await page.keyboard.press('Escape')
     await page.evaluate(() => localStorage.clear())
 
+    // --- 세션 장소명: 한 세션 안에서 세 화면이 같은 이름을 쓴다 (DESIGN.md 23절) ---
+    //
+    // **한 번의 SPA 세션 안에서** 해야 한다. `page.goto`는 앱을 새로 띄워 세션 표기를
+    // 비우므로(그것이 23절이 정한 수명이다) 중간에 새로 이동하지 않는다.
+    await page.evaluate(() => {
+      // 비교하려면 후보가 둘 이상이어야 한다. 하나는 미리 심고 하나는 검색으로 담는다.
+      localStorage.setItem('geoleobom.saved.v1', JSON.stringify([{ lon: '127.13060', lat: '36.46410' }]))
+    })
+    await page.goto(BASE + '/')
+    await page.waitForSelector('[data-kakao-map-host]')
+    if (vp.mobile && vp.width < 960) await page.click('button[aria-label="검색"]')
+    await page.fill('[role="combobox"]', '신관캠퍼스')
+    await page.waitForSelector('[role="option"]')
+    await page.click('[role="option"]')
+    await page.waitForSelector(`text=${METHOD}`)
+
+    const SESSION_NAME = '공주대학교 신관캠퍼스'
+    const headerName = await page.evaluate(() => document.querySelector('[data-result-heading]')?.textContent?.trim())
+    check(`${vp.name}: 세션 장소명 — 결과 헤더`, headerName === SESSION_NAME, String(headerName))
+
+    await page.click('button[aria-label="담기"]')
+    await page.waitForSelector('text=후보에 담았어요')
+    const openCandidates = vp.mobile && vp.width < 960 ? 'button[aria-label^="담은 후보 열기"]' : 'button:has-text("후보 2/4")'
+    await page.click(openCandidates)
+    await page.waitForSelector('dialog[open]')
+    const inList = await page.evaluate(
+      (name) => Array.from(document.querySelectorAll('dialog[open] li')).some((li) => li.textContent.includes(name)),
+      SESSION_NAME,
+    )
+    check(`${vp.name}: 세션 장소명 — 담은 후보 목록`, inList === true)
+    await shot(page, `${vp.name}-16b-session-label-list`)
+
+    await page.click('dialog[open] button:has-text("비교하기")')
+    await page.waitForSelector('table')
+    const inCompare = await page.evaluate(
+      (name) => Array.from(document.querySelectorAll('thead th')).some((th) => th.textContent.includes(name)),
+      SESSION_NAME,
+    )
+    check(`${vp.name}: 세션 장소명 — 비교 헤더`, inCompare === true)
+    await shot(page, `${vp.name}-16c-session-label-compare`)
+
+    await page.goBack()
+    await page.waitForSelector(`text=${METHOD}`)
+    const afterBack = await page.evaluate(() => document.querySelector('[data-result-heading]')?.textContent?.trim())
+    check(`${vp.name}: 세션 장소명 — 비교에서 돌아와도 유지`, afterBack === SESSION_NAME, String(afterBack))
+
+    // 이름은 화면에만 있다. 저장 계층에는 좌표뿐이다(게이트 1, 23절).
+    const leaked = await page.evaluate((name) => {
+      const parts = [JSON.stringify(history.state ?? null), location.href]
+      for (const store of [localStorage, sessionStorage]) {
+        for (let i = 0; i < store.length; i += 1) parts.push(`${store.key(i)}=${store.getItem(store.key(i))}`)
+      }
+      const all = parts.join('|')
+      return { leaked: all.includes(name) || all.includes('공주대학'), all: all.slice(0, 200) }
+    }, SESSION_NAME)
+    check(`${vp.name}: 세션 장소명이 저장 계층에 남지 않는다`, leaked.leaked === false, leaked.all)
+    await page.evaluate(() => localStorage.clear())
+
     // --- 상태 변형 화면 ---
     await page.goto(BASE + P_WARN)
     await page.waitForSelector('text=집계 미완료')
