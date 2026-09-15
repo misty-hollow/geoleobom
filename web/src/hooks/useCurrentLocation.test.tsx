@@ -345,6 +345,174 @@ describe('현위치 (DESIGN.md 24절)', () => {
     expect(last.searchParams.has('lon')).toBe(true)
   })
 
+  // --- 늦게 온 응답은 사용자의 선택을 덮지 않는다 -------------------------------
+  //
+  // `getCurrentPosition`에는 취소가 없다. 위치 확인이 몇 초 걸리는 동안 사용자는 이미
+  // 다른 곳을 정할 수 있고, 그때 도착한 응답이 pending을 덮어쓰면 방금 고른 지점이
+  // 말없이 바뀐다. 아래 넷은 그 "다른 곳을 정하는" 네 가지 방법이다.
+
+  describe('진행 중 요청보다 사용자의 선택이 우선한다', () => {
+    /** 늦게 온 응답이 바꿔서는 안 되는 것들. */
+    function snapshot() {
+      return {
+        path: window.location.pathname,
+        pin: fake.markers.at(-1)?.position.getLat(),
+        centers: fake.calls.setCenter.length,
+      }
+    }
+
+    it('loading 중 지도 탭 → 늦게 온 성공은 그 선택을 덮지 않는다', async () => {
+      await ready()
+      fireEvent.click(locateButton())
+      // 응답이 오기 전에 사용자가 지도를 탭했다.
+      act(() => {
+        fake.maps.event.trigger(fake.lastMap!, 'click', { latLng: fake.latLng(36.4715, 127.1405) })
+      })
+      await screen.findByRole('button', { name: ko.pending.analyze })
+      // 스피너는 멈춘다 — 기다리던 결과를 더 이상 쓰지 않는다.
+      expect(locateButton().hasAttribute('disabled')).toBe(false)
+      const before = snapshot()
+
+      resolveWith(geo, 30)
+
+      const after = snapshot()
+      expect(after.path, '늦게 온 현위치가 화면을 옮겼다').toBe(before.path)
+      expect(after.pin, '늦게 온 현위치가 pending을 덮었다').toBeCloseTo(36.4715, 5)
+      expect(after.centers, '늦게 온 현위치가 지도를 옮겼다').toBe(before.centers)
+      expect(screen.queryByText(/위치 오차가/)).toBeNull()
+    })
+
+    it('loading 중 검색 결과 선택 → 늦게 온 성공은 그 결과를 덮지 않는다', async () => {
+      await ready()
+      fireEvent.click(locateButton())
+      fireEvent.click(screen.getByRole('button', { name: '검색' }))
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: '공주대' } })
+      const option = await screen.findByRole('option', { name: /공주대학교 신관캠퍼스/ }, { timeout: 2000 })
+      fireEvent.click(option)
+      await waitFor(() => expect(window.location.pathname).toBe('/p/36.47130,127.14020'))
+      const centers = fake.calls.setCenter.length
+
+      resolveWith(geo, 30)
+
+      expect(window.location.pathname, '늦게 온 현위치가 검색 결과를 덮었다').toBe('/p/36.47130,127.14020')
+      // pending으로 되돌아가지 않는다.
+      expect(screen.queryByRole('button', { name: ko.pending.analyze })).toBeNull()
+      expect(fake.calls.setCenter.length).toBe(centers)
+    })
+
+    it('loading 중 `여기 분석`으로 확정 → 늦게 온 성공은 무시된다', async () => {
+      await ready()
+      // 먼저 지도 탭으로 pending을 만든다.
+      act(() => {
+        fake.maps.event.trigger(fake.lastMap!, 'click', { latLng: fake.latLng(36.4715, 127.1405) })
+      })
+      await screen.findByRole('button', { name: ko.pending.analyze })
+      // 그 상태에서 현위치를 누르고, 응답 전에 확정한다.
+      fireEvent.click(locateButton())
+      fireEvent.click(screen.getByRole('button', { name: ko.pending.analyze }))
+      await waitFor(() => expect(window.location.pathname).toBe('/p/36.47150,127.14050'))
+      await screen.findByText(METHOD_NOTICE)
+
+      resolveWith(geo, 30)
+
+      expect(window.location.pathname, '늦게 온 현위치가 확정을 되돌렸다').toBe('/p/36.47150,127.14050')
+      expect(screen.queryByRole('button', { name: ko.pending.analyze })).toBeNull()
+    })
+
+    it('loading 중 핀 드래그 → 늦게 온 성공은 그 좌표를 덮지 않는다', async () => {
+      await ready()
+      act(() => {
+        fake.maps.event.trigger(fake.lastMap!, 'click', { latLng: fake.latLng(36.4715, 127.1405) })
+      })
+      await screen.findByRole('button', { name: ko.pending.analyze })
+      fireEvent.click(locateButton())
+      // 사용자가 핀을 직접 옮겼다.
+      const pin = fake.markers.at(-1)!
+      act(() => {
+        pin.position = fake.latLng(36.4718, 127.1409)
+        fake.maps.event.trigger(pin, 'dragend')
+      })
+      await waitFor(() => expect(screen.getByText(/36\.47180/)).toBeTruthy())
+
+      resolveWith(geo, 30)
+
+      expect(screen.getByText(/36\.47180/), '늦게 온 현위치가 드래그한 좌표를 덮었다').toBeTruthy()
+    })
+
+    it('늦게 온 실패도 토스트를 만들지 않는다', async () => {
+      await ready()
+      fireEvent.click(locateButton())
+      act(() => {
+        fake.maps.event.trigger(fake.lastMap!, 'click', { latLng: fake.latLng(36.4715, 127.1405) })
+      })
+      await screen.findByRole('button', { name: ko.pending.analyze })
+
+      rejectWith(geo, 1)
+
+      expect(screen.queryByText(ko.locate.denied)).toBeNull()
+      expect(locateButton().className).not.toMatch(/locateMuted/)
+    })
+
+    it('아무것도 하지 않으면 기존 흐름 그대로다', async () => {
+      await ready()
+      fireEvent.click(locateButton())
+      resolveWith(geo, 3500)
+      await screen.findByText(ko.locate.inaccurate('3.5km'))
+      expect(screen.getByRole('button', { name: ko.pending.analyze })).toBeTruthy()
+    })
+  })
+
+  // --- `located`는 "손대지 않은 GPS 좌표"일 때만 참이다 ---------------------------
+
+  describe('사용자가 좌표를 손대면 GPS 표시가 풀린다', () => {
+    /** 현위치 성공까지 간다. */
+    async function located() {
+      await ready()
+      fireEvent.click(locateButton())
+      resolveWith(geo, 3500)
+      await screen.findByText(ko.locate.inaccurate('3.5km'))
+    }
+
+    async function searchOnce() {
+      requested.length = 0
+      fireEvent.click(screen.getByRole('button', { name: '검색' }))
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: '공주대' } })
+      await waitFor(() => expect(requested.some((url) => url.pathname === '/api/search')).toBe(true), {
+        timeout: 2000,
+      })
+      return requested.filter((url) => url.pathname === '/api/search').at(-1)!
+    }
+
+    it('핀을 직접 옮기면 오차 경고가 사라지고 지도 중심 검색이 돌아온다', async () => {
+      await located()
+      const pin = fake.markers.at(-1)!
+      act(() => {
+        pin.position = fake.latLng(36.4718, 127.1409)
+        fake.maps.event.trigger(pin, 'dragend')
+      })
+
+      // 24절 문구는 "핀을 옮겨 정확한 곳을 골라 주세요"다. 옮긴 뒤에도 남으면 이미 한
+      // 일을 다시 시키는 말이 된다.
+      await waitFor(() => expect(screen.queryByText(/위치 오차가/)).toBeNull())
+
+      const search = await searchOnce()
+      expect(search.searchParams.has('lon'), '드래그 뒤에도 지도 중심을 막고 있다').toBe(true)
+      expect(search.searchParams.has('lat')).toBe(true)
+    })
+
+    it('현위치 pending 상태에서 검색 결과를 고르면 이후 검색이 정상 동작한다', async () => {
+      await located()
+      fireEvent.click(screen.getByRole('button', { name: '검색' }))
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: '공주대' } })
+      const option = await screen.findByRole('option', { name: /공주대학교 신관캠퍼스/ }, { timeout: 2000 })
+      fireEvent.click(option)
+      await waitFor(() => expect(window.location.pathname).toBe('/p/36.47130,127.14020'))
+
+      const search = await searchOnce()
+      expect(search.searchParams.has('lon'), '검색 결과 선택 뒤에도 지도 중심을 막고 있다').toBe(true)
+    })
+  })
+
   it('기존 지도 탭 → pending 흐름은 그대로다', async () => {
     await ready()
     act(() => {

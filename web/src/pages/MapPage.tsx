@@ -124,6 +124,8 @@ export function MapPage() {
    * 두 가지다: 오차 경고 줄(24절 inaccurate)과 **검색 지도 중심 차단**(아래 `searchCenter`).
    */
   const [located, setLocated] = useState<{ accuracyM: number } | null>(null)
+  /** 현위치 훅의 지금 값. 핀 처리 콜백이 훅보다 먼저 선언돼 있어 참조로 잇는다. */
+  const locateRef = useRef<{ invalidate: () => void } | null>(null)
   // 첫 렌더부터 목적 스냅으로 둔다. 'peek'에서 시작하면 공유 URL 진입마다 peek→half 애니메이션이 보인다(QA 2026-09-12).
   const [snap, setSnap] = useState<SheetSnap>(() => (fixed === null ? 'peek' : 'half'))
   const [expanded, setExpanded] = useState<NearestCategory | null>(null)
@@ -226,14 +228,30 @@ export function MapPage() {
   }, [route.state, analysisData, announcer])
 
   // --- 지도 -----------------------------------------------------------------
+  /**
+   * 사용자가 **다른 방법으로** 위치를 정했다 (24절 delta).
+   *
+   * 두 가지를 함께 한다. ① 진행 중인 현위치 요청의 결과 권한을 뺏는다 — 몇 초 뒤 도착한
+   * 응답이 방금 고른 지점을 덮어쓰지 않게. ② `located` 표시를 지운다 — 이제 화면의
+   * pending은 **손대지 않은 geolocation fix가 아니다.** 그 표시가 하는 일 두 가지(오차
+   * 경고, 지도 중심 검색 차단)가 모두 "아직 GPS가 준 그대로인가"를 전제하기 때문이다.
+   *
+   * 특히 핀을 직접 옮긴 뒤에는 경고 문구("핀을 옮겨 정확한 곳을 골라 주세요")가 이미 한
+   * 일을 다시 시키는 말이 된다.
+   */
+  const supersedeLocation = useCallback(() => {
+    locateRef.current?.invalidate()
+    setLocated(null)
+  }, [])
+
   const onPinPlace = useCallback(
     (point: Point) => {
       setPending(point)
       // 사용자가 지도에서 새로 고른 지점이다. 현위치에서 온 좌표가 아니다.
-      setLocated(null)
+      supersedeLocation()
       if (fixedRef.current !== null) navigate('/')
     },
-    [navigate],
+    [navigate, supersedeLocation],
   )
   const onPinDragStart = useCallback(() => {
     const current = fixedRef.current
@@ -243,7 +261,14 @@ export function MapPage() {
       navigate('/')
     }
   }, [navigate])
-  const onPinDragEnd = useCallback((point: Point) => setPending(point), [])
+  const onPinDragEnd = useCallback(
+    (point: Point) => {
+      setPending(point)
+      // 핀을 직접 옮겼다 — 좌표는 이제 사용자가 고른 것이고 GPS 오차 경고도 끝났다.
+      supersedeLocation()
+    },
+    [supersedeLocation],
+  )
 
   const { status: mapStatus, map } = useKakaoMap({
     initialCenter: fixed ?? DEFAULT_CENTER,
@@ -431,9 +456,11 @@ export function MapPage() {
       // 명칭은 **메모리에만** 넣는다(23절). 라우터 state로 넘기면 history.state에 남는다.
       places.remember(point, { name: result.name, source: 'search' })
       if (result.address !== '') rememberAddress(addressesRef.current, pointKey(point), result.address)
+      // 검색 결과를 골랐다. 진행 중인 현위치 요청과 GPS 표시는 여기서 끝난다.
+      supersedeLocation()
       navigate(toPlacePath(point), { replace: isSearch })
     },
-    [navigate, isSearch, places],
+    [navigate, isSearch, places, supersedeLocation],
   )
 
   const analyzePending = useCallback(() => {
@@ -441,10 +468,11 @@ export function MapPage() {
     // 지도 탭·드래그로 고른 지점(23절 `pin`). **현위치도 확정되면 같은 의미다** —
     // `current-location`·`gps` 같은 출처를 새로 만들지 않는다(24절 마지막 줄).
     places.remember(pending, { source: 'pin' })
+    // 확정도 "사용자가 정했다"이다. 늦게 온 현위치가 확정 뒤에 pending을 되살리지 않는다.
+    supersedeLocation()
     navigate(toPlacePath(pending))
     setPending(null)
-    setLocated(null)
-  }, [pending, navigate, places])
+  }, [pending, navigate, places, supersedeLocation])
 
   /** × ·같은 행 재탭으로 경로를 닫는다. 지도는 그대로 두고 `userMoved`만 끈다(DESIGN.md 7-2). */
   const closeRoute = useCallback(() => {
@@ -480,6 +508,10 @@ export function MapPage() {
     onDenied: useCallback(() => announcer.toast(ko.locate.denied), [announcer]),
     onUnavailable: useCallback(() => announcer.toast(ko.locate.unavailable), [announcer]),
   })
+
+  // `supersedeLocation`은 위(핀 처리)에서 선언돼 이 훅보다 먼저 만들어진다. 그쪽이
+  // 훅의 `invalidate`를 부를 수 있도록 참조만 여기에 담는다.
+  locateRef.current = locate
 
   /**
    * 검색이 카카오에 줄 지도 중심 (v2.5 4-4) — **미확정 현위치는 내보내지 않는다.**

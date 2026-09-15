@@ -15,6 +15,18 @@
  *     좌표의 유일한 자리는 화면의 pending 상태 하나이며(24절), 여기에 사본을 두면
  *     "어디에 남았나"를 세는 자리가 둘이 된다.
  *
+ * ## 늦게 온 응답은 사용자의 선택을 덮지 않는다
+ *
+ * `getCurrentPosition`에는 취소 API가 없다. 브라우저는 우리가 관심을 잃은 뒤에도 콜백을
+ * 부른다 — 위치 확인은 몇 초가 걸리고, 그동안 사용자는 지도를 탭하거나 검색 결과를 고르거나
+ * `여기 분석`을 눌러 **이미 다른 곳을 정할 수 있다.** 그때 도착한 응답이 pending을 덮어쓰면
+ * 사용자가 방금 고른 지점이 말없이 바뀐다.
+ *
+ * 그래서 요청마다 **세대 번호**를 붙이고, 콜백은 자기 세대가 아직 최신일 때만 화면에
+ * 말을 건다. `invalidate()`가 그 번호를 올린다 — 화면이 "이제 이 요청의 결과는 필요 없다"고
+ * 말하는 한 줄이며, 브라우저 요청 자체는 그대로 두고(끊을 방법이 없다) **결과의 권한만**
+ * 빼앗는다. 늦게 온 성공도 실패도 그 뒤로는 아무것도 바꾸지 못한다(토스트도 없다).
+ *
  * ## 실패는 두 갈래뿐이다
  *
  * 24절의 상태표대로 `PERMISSION_DENIED`는 `denied`(권한 안내), 그 밖(`POSITION_UNAVAILABLE`·
@@ -45,6 +57,13 @@ export interface UseCurrentLocation {
   status: LocationStatus
   /** 버튼 클릭에서만 부른다. */
   request: () => void
+  /**
+   * 진행 중인 요청의 결과를 버린다.
+   *
+   * 사용자가 **다른 방법으로** 위치를 정했을 때 화면이 부른다(지도 탭·핀 드래그·검색
+   * 결과 선택·`여기 분석`). 이미 끝난 요청에 불러도 아무 일도 없다.
+   */
+  invalidate: () => void
 }
 
 export interface UseCurrentLocationOptions {
@@ -65,17 +84,30 @@ export function useCurrentLocation({
   const handlers = useRef({ onSuccess, onDenied, onUnavailable })
   handlers.current = { onSuccess, onDenied, onUnavailable }
   const inFlight = useRef(false)
+  /** 지금 유효한 요청 세대. 콜백은 자기 세대가 이 값일 때만 화면에 말을 건다. */
+  const generation = useRef(0)
 
   // 키가 아니라 **값**을 본다. `'geolocation' in navigator`는 값이 undefined여도 참이라
   // API가 없는 환경에서 버튼을 남긴다(24절: 없으면 버튼 자체를 숨긴다).
   const supported = typeof navigator !== 'undefined' && navigator.geolocation != null
 
+  const invalidate = useCallback(() => {
+    if (!inFlight.current) return
+    generation.current += 1
+    inFlight.current = false
+    // 스피너를 끈다. 기다리던 결과를 더 이상 쓰지 않기로 했으므로 loading이 아니다.
+    setStatus('idle')
+  }, [])
+
   const request = useCallback(() => {
     if (!supported || inFlight.current) return
     inFlight.current = true
+    generation.current += 1
+    const thisRun = generation.current
     setStatus('loading')
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        if (thisRun !== generation.current) return // 사용자가 그 사이 다른 곳을 정했다
         inFlight.current = false
         setStatus('idle')
         handlers.current.onSuccess({
@@ -86,6 +118,7 @@ export function useCurrentLocation({
         })
       },
       (error) => {
+        if (thisRun !== generation.current) return // 늦게 온 실패도 토스트를 띄우지 않는다
         inFlight.current = false
         // 거부는 "권한을 켜 주세요"가 아니라 **다른 방법 안내**로 끝난다(24절).
         const denied = error.code === error.PERMISSION_DENIED
@@ -99,5 +132,5 @@ export function useCurrentLocation({
     )
   }, [supported])
 
-  return { supported, status, request }
+  return { supported, status, request, invalidate }
 }
