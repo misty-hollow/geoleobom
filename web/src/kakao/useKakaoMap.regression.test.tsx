@@ -381,6 +381,80 @@ describe('useKakaoMap 회귀', () => {
       for (const circle of circles) expect(circle).toContain('cy="8"')
     })
 
+    /**
+     * 2026-09-15 통합점검 Major의 회귀.
+     *
+     * 실제 SDK는 `setBounds` 안에서 `zoom_changed`를 **동기로** 흘린다. 값만 보던 가드는
+     * 그 순간 새 배율을 아직 적어 두지 못해 우리 이동을 사용자 조작으로 셌고, **첫 fit
+     * 한 번으로 `userMoved`가 켜졌다.** 그 뒤 모든 시설 전환이 "사용자가 잡아둔 배율"
+     * 규칙(목적지만 보이면 이동 없음)으로 들어가, 새 경로의 아랫부분이 시트 뒤에 남았다.
+     */
+    it('첫 fit이 흘린 zoom_changed는 userMoved를 켜지 않는다 (동기 발화)', async () => {
+      const { map } = await mounted()
+      const before = fake.calls.setLevel.length
+      act(() => map.setRoute({ line: HUGE, origin: ORIGIN }, { bottomInset: 0, frame: 'fit' }))
+      // fit이 배율을 실제로 바꿨다 = SDK가 zoom_changed를 흘렸다. 그 전제가 깨지면
+      // 이 검사는 아무것도 보지 못하므로 함께 확인한다.
+      expect(fake.calls.setLevel.length, 'fit이 배율을 바꾸지 않아 검사가 공허하다').toBeGreaterThan(before)
+      expect(map.userMoved(), '우리 fit이 사용자 이동으로 세어졌다').toBe(false)
+    })
+
+    it('프로그램 pan·recenter·centerOn도 userMoved를 켜지 않는다', async () => {
+      const { map } = await mounted()
+      act(() => map.setRoute({ line: OFFSCREEN }, { bottomInset: 0, frame: 'auto' }))
+      expect(map.userMoved()).toBe(false)
+      act(() => map.recenter())
+      expect(map.userMoved()).toBe(false)
+      act(() => map.centerOn(ORIGIN, 300))
+      expect(map.userMoved()).toBe(false)
+    })
+
+    /**
+     * 통합점검 재현 조건 그대로: 768×1024 · 모바일(상단바 72) · half 시트(520).
+     * 새 경로가 시트 뒤로 들어가면 안 된다.
+     */
+    it('768×1024 half 시트에서 시설을 바꿔도 새 경로가 시트 뒤로 들어가지 않는다', async () => {
+      const VIEW_768 = { width: 768, height: 1024 }
+      const SHEET_HALF = 520 // computeSheetHeights(1024) = min(520, 1024*0.52)
+      const TOP = 72 // 모바일 플로팅 상단바
+      const { result } = renderHook(() => useKakaoMap({ initialCenter: ORIGIN }))
+      render(<div ref={result.current.map.attach} />)
+      await flush()
+      fake.setViewport(VIEW_768.width, VIEW_768.height)
+      act(() => fake.lastMap!.setLevel(4))
+      act(() => fake.lastMap!.setCenter(fake.latLng(ORIGIN.lat, ORIGIN.lon)))
+      const map = result.current.map
+
+      // 첫 경로 — 시트 위 가시영역에 맞춘다.
+      const first: LonLatPair[] = [
+        [127.14, 36.47],
+        [127.1404, 36.4696],
+      ]
+      act(() => map.setRoute({ line: first, origin: ORIGIN }, { bottomInset: SHEET_HALF, topInset: TOP, frame: 'fit' }))
+      expect(map.userMoved(), '첫 fit이 userMoved를 켰다').toBe(false)
+
+      // 다른 시설 — 남쪽으로 더 긴 경로. 목적지만 보고 판단하면 아랫부분이 시트에 가린다.
+      const second: LonLatPair[] = [
+        [127.14, 36.47],
+        [127.1406, 36.4688],
+        [127.1409, 36.4679],
+      ]
+      act(() => map.setRoute({ line: second, origin: ORIGIN }, { bottomInset: SHEET_HALF, topInset: TOP, frame: 'auto' }))
+
+      // 판정은 화면 픽셀로 한다. 가시영역 = 뷰포트 − (상단바 + 여백 / 시트 + 여백 / 좌우 여백).
+      const projection = fake.lastMap!.getProjection()
+      const visibleBottom = VIEW_768.height - SHEET_HALF - 24
+      const visibleTop = TOP + 24
+      for (const [lon, lat] of second) {
+        const at = projection.containerPointFromCoords(fake.latLng(lat, lon))
+        expect(at.y, `경로 점이 시트 뒤로 들어갔다 (${at.y} > ${visibleBottom})`).toBeLessThanOrEqual(visibleBottom)
+        expect(at.y).toBeGreaterThanOrEqual(visibleTop)
+      }
+      // 출발 핀(좌표에서 위로 40px)도 상단바에 잘리지 않는다.
+      const head = projection.containerPointFromCoords(fake.latLng(ORIGIN.lat, ORIGIN.lon))
+      expect(head.y - 40).toBeGreaterThanOrEqual(visibleTop)
+    })
+
     it('resetUserMoved()는 사용자 이동 표시를 끈다(× ·같은 행 재탭)', async () => {
       const { map } = await mounted()
       act(() => fake.maps.event.trigger(fake.lastMap!, 'dragend'))

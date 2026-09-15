@@ -105,7 +105,9 @@ const measure = () => {
     const p = paths[paths.length - 1]
     const start = p.getPointAtLength(0).matrixTransform(p.getScreenCTM())
     const end = p.getPointAtLength(p.getTotalLength()).matrixTransform(p.getScreenCTM())
-    route = { ...rect(p), start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y }, d: p.getAttribute('d')?.slice(0, 40), count: paths.length }
+    // `d`는 **전체 geometry**다. 앞 40자만 보면 두 경로가 같은 canonical snap 출발점에서
+    // 시작하므로 정상 교체를 "안 바뀜"으로 읽는다(2026-09-15 통합점검: 960·1280 timeout).
+    route = { ...rect(p), start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y }, d: p.getAttribute('d') ?? '', count: paths.length }
   }
   const sheet = document.querySelector('section[data-snap]')
   const topbar = document.querySelector('header')
@@ -278,12 +280,20 @@ async function roundTrip(browser) {
   }
 
   /**
-   * **전환으로 들어온 데스크톱이 cold entry와 같은 곳을 본다** (Fable delta QA 2026-09-13).
+   * 전환으로 들어온 데스크톱의 프레이밍 (Fable delta QA 2026-09-13 → Week 4 개정).
    *
-   * Fable 재현: 390 → 1280 전환 뒤 핀 y≈191·경로 bbox 107~277. 1280으로 바로 들어오면
-   * 핀 y≈400·경로 229~571 — 지도 내용이 데스크톱 위쪽 1/3에 몰렸다. 원인은 프레이밍이
-   * **이전 배치(모바일 시트)의 inset**을 쓴 것이다. 기준값은 같은 좌표·같은 경로로 1280에
-   * 바로 들어온 새 페이지에서 잰다.
+   * 2026-09-13에는 **cold entry와 같아야 한다**가 기준이었다. 그때는 배치가 바뀌면 지도를
+   * 다시 맞췄고, 그 재-프레이밍이 이전 배치(모바일 시트)의 inset을 쓰는 것이 결함이었다.
+   *
+   * **DESIGN.md 7-2(Week 4)가 그 규칙을 뒤집었다** — "시트 스냅·행 확장·배치 전환 → 지도
+   * 이동 없음. 다음 조정 때 가시영역 재계산". 이제 전환 뒤 화면은 모바일에서 맞춘 그대로이며
+   * cold entry와 같을 이유가 없다(PR #24, `MapPage.responsive.test.tsx`가 같은 개정을 단위
+   * 검사에서 이미 반영했다). 그래서 여기서는 그 등식을 요구하지 않는다.
+   *
+   * 남는 불변식은 **왕복해도 흘러가지 않는다**이다 — 경계를 여러 번 넘어도 전환으로 들어온
+   * 데스크톱 프레이밍이 서로 같아야 한다. 원래 결함(전환마다 stale inset으로 다시 맞춤)은
+   * 그 비교에서 값이 어긋나는 모습으로 그대로 잡힌다. cold entry 값은 사람이 스크린샷과
+   * 함께 보도록 메모로 남긴다.
    */
   const coldContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, locale: 'ko-KR' })
   const coldPage = await coldContext.newPage()
@@ -302,17 +312,23 @@ async function roundTrip(browser) {
   // 타일·경로 렌더의 소수점 때문에 몇 px은 흔들린다. Fable이 본 차이는 200px 대였다.
   const TOLERANCE = 12
   const near = (a, b) => a !== null && b !== null && Math.abs(a - b) <= TOLERANCE
+  const [firstCrossing, ...laterCrossings] = desktopFraming
+  for (const [label, framing] of laterCrossings) {
+    check(
+      `왕복 ${label}: 핀 자리가 첫 전환과 같다(왕복해도 흘러가지 않는다)`,
+      near(framing.pin?.b ?? null, firstCrossing?.[1].pin?.b ?? null),
+      JSON.stringify({ 이번: framing.pin, 첫전환: firstCrossing?.[1].pin }),
+    )
+    check(
+      `왕복 ${label}: 경로 bbox가 첫 전환과 같다`,
+      near(framing.route?.top ?? null, firstCrossing?.[1].route?.top ?? null) &&
+        near(framing.route?.bottom ?? null, firstCrossing?.[1].route?.bottom ?? null),
+      JSON.stringify({ 이번: framing.route, 첫전환: firstCrossing?.[1].route }),
+    )
+  }
   for (const [label, framing] of desktopFraming) {
-    check(
-      `왕복 ${label}: 핀이 cold entry와 같은 자리다`,
-      near(framing.pin?.b ?? null, cold.pin?.b ?? null),
-      JSON.stringify({ 전환: framing.pin, cold: cold.pin }),
-    )
-    check(
-      `왕복 ${label}: 경로 bbox가 cold entry와 같다`,
-      near(framing.route?.top ?? null, cold.route?.top ?? null) && near(framing.route?.bottom ?? null, cold.route?.bottom ?? null),
-      JSON.stringify({ 전환: framing.route, cold: cold.route }),
-    )
+    // 7-2가 등식을 요구하지 않는다. 값 자체는 사람이 스크린샷과 대조하도록 남긴다.
+    note(`왕복 ${label}: 전환 프레이밍 vs 1280 cold entry`, JSON.stringify({ 전환: framing.route, cold: cold.route }))
   }
   check('왕복: 콘솔·페이지 오류 없음', errors.length === 0, errors.slice(0, 4).join(' | '))
   await context.close()
@@ -586,18 +602,69 @@ async function main() {
     await shot(page, `${vp.name}-07-route`)
 
     // top3 교체
+    //
+    // **무엇이 바뀌면 교체인가.** 두 경로는 같은 canonical snapped origin에서 출발하므로
+    // 경로 문자열의 앞부분이 같을 수 있다. 그래서 `d`의 앞 40자를 보던 예전 판정은 정상
+    // 교체를 놓치고 timeout으로 끝났고(2026-09-15 통합점검: 960·1280), 그 뒤의 roundTrip
+    // 구간이 아예 실행되지 않았다. 교체의 실제 의미 — **경로 전체 + 목적지 자리** — 를
+    // 하나의 서명으로 만들어 그것이 달라지기를 기다린다. timeout을 늘려 덮지 않는다.
+    const signature = () =>
+      page.evaluate(() => {
+        const ps = Array.from(document.querySelectorAll('[role="application"] svg path')).filter(
+          (el) => el.getBoundingClientRect().width + el.getBoundingClientRect().height > 0,
+        )
+        const last = ps[ps.length - 1]
+        const dest = Array.from(document.querySelectorAll('[role="application"] img')).find(
+          (i) => i.src.startsWith('data:image/svg+xml') && Math.round(i.getBoundingClientRect().width) === 16,
+        )
+        const box = dest?.getBoundingClientRect()
+        return JSON.stringify({
+          paths: ps.length,
+          d: last?.getAttribute('d') ?? '',
+          dest: box === undefined ? null : [Math.round(box.left), Math.round(box.top)],
+        })
+      })
     const dBefore = s.route?.d
     const destBefore = s.dest
+    const sigBefore = await signature()
     const items = await page.$$('#top3-convenience button')
     if (items.length >= 2) {
       await items[1].click()
-      await page.waitForFunction((prev) => {
-        const ps = document.querySelectorAll('[role="application"] svg path')
-        return ps.length >= 2 && ps[ps.length - 1].getAttribute('d')?.slice(0, 40) !== prev
-      }, dBefore, { timeout: 20000 })
+      await page.waitForFunction(
+        (prev) => {
+          const ps = Array.from(document.querySelectorAll('[role="application"] svg path')).filter(
+            (el) => el.getBoundingClientRect().width + el.getBoundingClientRect().height > 0,
+          )
+          if (ps.length < 2) return false
+          const last = ps[ps.length - 1]
+          const dest = Array.from(document.querySelectorAll('[role="application"] img')).find(
+            (i) => i.src.startsWith('data:image/svg+xml') && Math.round(i.getBoundingClientRect().width) === 16,
+          )
+          const box = dest?.getBoundingClientRect()
+          const now = JSON.stringify({
+            paths: ps.length,
+            d: last?.getAttribute('d') ?? '',
+            dest: box === undefined ? null : [Math.round(box.left), Math.round(box.top)],
+          })
+          return now !== prev
+        },
+        sigBefore,
+        { timeout: 20000 },
+      )
       await page.waitForTimeout(700)
       s = await m()
-      check(`${vp.name}: top3 전환 → 경로선·목적지 교체`, s.route !== null && s.route.d !== dBefore && s.dest !== null && (Math.abs(s.dest.x - destBefore.x) > 2 || Math.abs(s.dest.y - destBefore.y) > 2), JSON.stringify({ dest: s.dest && [rnd(s.dest.x), rnd(s.dest.y)], before: destBefore && [rnd(destBefore.x), rnd(destBefore.y)] }))
+      check(
+        `${vp.name}: top3 전환 → 경로선·목적지 교체`,
+        s.route !== null &&
+          s.route.d !== dBefore &&
+          s.dest !== null &&
+          (Math.abs(s.dest.x - destBefore.x) > 2 || Math.abs(s.dest.y - destBefore.y) > 2),
+        JSON.stringify({
+          dest: s.dest && [rnd(s.dest.x), rnd(s.dest.y)],
+          before: destBefore && [rnd(destBefore.x), rnd(destBefore.y)],
+          geometryChanged: s.route?.d !== dBefore,
+        }),
+      )
       check(`${vp.name}: 교체된 경로선도 시트에 가리지 않음`, s.route !== null && s.route.b <= (mobile ? s.sheet.y : vp.height) - 4, s.route && `route.bottom=${rnd(s.route.b)}`)
       if (mobile) check(`${vp.name}: 교체된 경로선도 상단 검색바 아래`, s.route !== null && s.route.y >= s.topbar.b, `route.top=${rnd(s.route?.y)} topbar.bottom=${rnd(s.topbar.b)}`)
       await shot(page, `${vp.name}-08-route-top3`)

@@ -531,7 +531,11 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
           userMovedRef.current = true
         })
         kakao.maps.event.addListener(map, 'zoom_changed', () => {
-          if (map.getLevel() !== programmaticLevelRef.current) userMovedRef.current = true
+          // 우리가 부르는 중에 나온 이벤트(동기)이거나, 우리가 만든 배율 그대로인
+          // 이벤트(비동기 메아리)면 사용자 이동이 아니다.
+          if (programmaticDepth.current > 0) return
+          if (map.getLevel() === programmaticLevelRef.current) return
+          userMovedRef.current = true
         })
         // 막대는 지도를 만들면서 생긴다. 화면이 알려 둔 inset을 곧바로 반영한다.
         applyAttributionInset()
@@ -661,11 +665,29 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
    * 만들지 않는다).
    */
   const programmaticLevelRef = useRef<number | null>(null)
+  /**
+   * 지금 우리가 지도를 움직이는 중인가.
+   *
+   * **실제 카카오 SDK는 `setBounds` 안에서 `zoom_changed`를 동기로 흘린다.** 값 비교만
+   * 하던 가드는 그 순간 아직 새 배율을 적어 두지 못해(적는 시점이 `move()`가 끝난
+   * 뒤였다) 우리 이동을 사용자 조작으로 셌다. 첫 fit 한 번으로 `userMoved`가 켜지고,
+   * 그 뒤 모든 시설 전환이 "사용자가 잡아둔 배율" 규칙으로 잘못 들어갔다
+   * (2026-09-15 실 SDK 재현: 첫 fit 직후 `zoom_changed` level=3, 기억한 값 null).
+   *
+   * 그래서 **동기 구간**은 깊이로, **비동기 메아리**는 값으로 거른다. 둘 다 타이머가
+   * 아니다.
+   */
+  const programmaticDepth = useRef(0)
 
-  /** 프로그램 이동을 감싼다. 끝난 뒤의 배율을 기억해 그 메아리를 걸러낸다. */
+  /** 프로그램 이동을 감싼다. 그 안에서 나온 이벤트와 끝난 뒤의 메아리를 모두 거른다. */
   const programmatic = useCallback((move: () => void) => {
-    move()
-    programmaticLevelRef.current = mapRef.current?.getLevel?.() ?? null
+    programmaticDepth.current += 1
+    try {
+      move()
+    } finally {
+      programmaticDepth.current -= 1
+      programmaticLevelRef.current = mapRef.current?.getLevel?.() ?? null
+    }
   }, [])
 
   /**
