@@ -1,6 +1,6 @@
 # 현재 상태 (STATUS.md)
 
-갱신: 2026-09-15 (Week 4 production 배포 완료 — `0699eff`). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
+갱신: 2026-09-15 (목적지 링 = 실제 시설 POI `#30` 병합 — main `5eca67e`. 운영은 `0699eff`). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
 
 **이 파일은 현재 상태와 역사 기록을 함께 담는다.** 아래 "지금 동작하는 것"과 "현재
 작업과 다음 행동"이 현재이고, 날짜가 붙은 절(`## … (2026-09-12, …)` 등)은 **그때의
@@ -30,9 +30,28 @@
   - **세션 장소명(DESIGN.md §23) — main에 병합됐다.** PR #25, merge `46c048bc6a1ea5dafcff5a61461d665fa501f2f6`. 장소 표기(`name`·`source`)를 라우트보다 위(`App`)의 메모리 보관함으로 올리고, 결과 헤더·담은 후보 목록·비교 헤더가 **같은 resolver**를 쓴다. 저장 계층은 그대로다 — 후보는 계속 좌표만 최대 4개이고 이름·출처는 localStorage·sessionStorage·URL·`history.state` 어디에도 넣지 않는다. 새로고침하면 표기가 사라지고 좌표로 돌아간다.
   - **비교표 재설계(DESIGN.md §13·§14) — main에 병합됐다.** PR #26, merge `ab2928ccd62d21db9c3de57aaef6112133f06045`. 헤더 → trust 2줄(`poi_date` 전체 최솟값 한 줄) → 표 → METHOD_NOTICE 순서로 바로잡고, 후보 헤더(태그 → §23 이름 ≤767 2줄/≥768 1줄+`title` → 출처 라벨(≥768) → 좌표, 높이 100/80), 열 폭(첫 열 88·≤359 84·≥768 120, 후보 열 72 잠금 또는 균등), 우세 항목 `tfoot`(≥640에서만 sticky + 위쪽 선·그림자), thead·첫 열 항상 sticky, 가로 스크롤 가장자리 신호(`--shadow-1` 오버레이, 시작/중간/끝 전환), `scroll-snap x proximity`를 구현했다. 계산·API·우세 판정 의미는 그대로다. 브라우저 QA는 `npm run qa:compare`(8 뷰포트, mock API).
   - **현위치 입력(DESIGN.md §24) — main에 병합됐다.** PR #27, merge `e737e6816abcd248941197a486b97dc265c7e8ca`. 버튼을 눌렀을 때만 `getCurrentPosition` 1회이고, 얻은 좌표는 **기존 pending 핀 흐름**으로 들어가 `여기 분석`으로만 확정된다(확정 뒤 출처는 기존 `pin`). `watchPosition`·IP 추정·정확도 원·새 백엔드 API·새 오류 코드는 없다. 확정 전 좌표는 저장 4곳과 걸어봄 API 어디에도 가지 않으며, **지도 중심 검색(Search B)으로 우회 전송되는 경로도 막았다** — 미확정 현위치가 떠 있는 동안만 중심을 보내지 않고 확정하거나 지도를 탭하면 원래대로 돌아온다.
-  - **여섯 병합분(#23·#24·#25·#26·#27·#28)이 모두 production에 배포됐다** (2026-09-15). Week 4의 승인된 구현 항목은 모두 main에 있고, 이제 운영에도 있다.
+  - **여섯 병합분(#23·#24·#25·#26·#27·#28)이 production에 배포됐다** (2026-09-15, `0699eff`). 그 뒤 **#30이 main에 더 들어왔고 아직 배포되지 않았다**(아래).
   - **통합점검 Major 1건(경로 교체 프레이밍 회귀) — main에 병합됐다.** PR #28, merge `0699eff7c82d7b321d98f8ae0b28626286186b9d`. 실 Kakao SDK + 실 OSRM + 실데이터 768×1024·half 시트에서 시설을 바꾸면 새 경로 아랫부분이 시트 뒤로 들어갔다(재현: 경로 bottom 587 vs 시트 top 504, 83px). 원인은 카메라 규칙이 아니라 **`userMoved` 가드**다 — 실제 SDK가 `setBounds` 안에서 `zoom_changed`를 동기로 흘리는데 값 비교만 하던 가드가 그 순간 새 배율을 아직 적어 두지 못해 **우리 fit을 사용자 조작으로 셌다.** 그 뒤 모든 시설 전환이 "사용자가 잡아둔 배율" 규칙(목적지만 보이면 이동 없음)으로 들어갔다. 동기 구간을 깊이로 거르도록 가드만 고쳤고 §7-2 상태 머신은 그대로다.
-  - **현재 상태: Week 4 production 배포 완료 (2026-09-15).** 배포 SHA `0699eff7c82d7b321d98f8ae0b28626286186b9d`. 판정 **DEPLOY SUCCESS**.
+  - **목적지 링 = 실제 시설 POI(DESIGN.md §7-1·§7-2, v2.5 4-4) — main에 병합됐다.** PR #30, merge `5eca67e8399b59dc250e71d03c4d8edecc285c74`. 목적지 16px 링이 경로 geometry의 마지막 점에 놓여 **보행망 접근점(도로 위)** 을 가리키던 것을 바로잡았다. 실데이터 45경로에서 시설 POI ↔ 접근점은 중앙 15.3m·최대 61.5m이고 31건이 10m 이상이다. 원인은 OSRM이 아니라 충청권 OSM의 보도 geometry 부족이므로 **profile·그래프·geometry는 건드리지 않았다.**
+    - **표시 의미**: `route geometry` 끝 = 보행망 **접근점** / 16px 링 = **실제 시설 POI** / 출발 핀 = 기존 그대로. 그 사이 10~30m를 점선·connector로 잇지 않고 접근점 dot도 만들지 않는다(직선이 걸어갈 수 있는 통로라는 보장이 없다).
+    - **API는 additive**다. `Facility`에 `lon`·`lat`(GeoPackage 배포본 원본 POI 좌표) 추가. `snapped_dest`·geometry 마지막 점·hint·canonical snap 요건·`walk_seconds`·`walk_m`·`straight_m`·`detour_flag`·`tm1`·`data_version`은 **바꾸지 않았다.** `deploy/smoke.py`의 `summarise()`가 시설 좌표를 보지 않아 **기준값을 다시 기록하지 않았다.**
+    - **프레이밍**: §7-2 경로 bbox에 시설 POI를 포함한다(링이 선 위에 없어 geometry만으로는 "접근점은 화면 안, 링은 밖"을 맞음으로 판정한다). 상태 머신 갈래와 `userMoved` 의미는 그대로이고 #28의 가드도 손대지 않았다.
+    - **data / deploy / OSRM / CI 변경 없음** — `0699eff → 5eca67e` diff는 api 13 · web 8 · docs 1 파일뿐이다.
+
+  - **현재 배포 상태 (2026-09-15 기준).** 운영은 `0699eff`, main은 `5eca67e`. **최신 main은 아직 production에 배포되지 않았다.**
+
+    | | 값 |
+    |---|---|
+    | production API 컨테이너 | `ghcr.io/misty-hollow/geoleobom-api:0699eff…` |
+    | production `web/current` | `0699eff…` (자산 `assets/index-BMNpKZYk.js`) |
+    | production `web/previous` | `b070bcb…` (Week 3) |
+    | production `data/current` | `2026Q3-cc-03` (previous `2026Q3-cc-02`) |
+    | `.env.last-good` | `0699eff…` + digest 고정 |
+    | main (미배포) | `5eca67e…` |
+
+    운영 `/api/analyze`의 `Facility`에는 아직 `lon`·`lat`가 **없다** — 그 필드는 `5eca67e`부터다. 즉 **운영 지도의 목적지 링은 아직 접근점을 가리킨다.**
+
+  - **직전 배포 기록: Week 4 production 배포 (2026-09-15).** 배포 SHA `0699eff7c82d7b321d98f8ae0b28626286186b9d`. 판정 **DEPLOY SUCCESS**.
     - **API**: `deploy/deploy_api.sh`로 배포. 내장 5좌표 스모크 통과 뒤에만 갱신되는 `.env.last-good`이 `0699eff`가 됐다. 컨테이너 이미지도 그 SHA로 확인했다.
     - **web**: `deploy/deploy_web.sh`로 배포. `web/current → 0699eff…`, **`web/previous → b070bcb…`(Week 3 보존)**, 공개 자산 `assets/index-BMNpKZYk.js`.
     - **데이터·OSRM은 건드리지 않았다** — `data/current = 2026Q3-cc-03`·`previous = 2026Q3-cc-02` 그대로이고 OSRM은 `v5.27.1` 컨테이너가 재생성 없이 계속 떠 있다(3일 가동).
@@ -42,7 +61,34 @@
     - **현위치 개인정보(가상 좌표)**: 진입만으로 권한 요청 없음, 성공해도 pending만 생성되고 URL·저장 계층에 좌표 없음, **미확정 상태 검색이 `/api/search`에 GPS 좌표를 싣지 않음**.
     - **로그 개인정보**: Caddy·API 로그에서 좌표·검색어·쿼리 문자열·`Referer`·`Cookie`·REST 키 **0건**, `remote_ip`는 `/24` 마스킹 유지(`183.107.204.0`), `client_ip` 미기록. 접근 로그의 `uri`는 `/api/search`처럼 경로 템플릿만 남는다.
     - **롤백 준비**: code는 `.env.before-this-deploy`(=`b070bcb`)와 GHCR의 Week 3 이미지, web은 `web/previous`(=`b070bcb`)로 되돌릴 수 있다. 이번 배포에서 롤백은 **실행하지 않았다**.
+  - **`5eca67e` 배포 준비 점검 (2026-09-15) — 판정 READY TO DEPLOY.** 이전 점검을 전부 반복하지 않고 #30으로 바뀐 부분과 배포 조건만 다시 봤다.
+
+    | 항목 | 결과 |
+    |---|---|
+    | local main == origin/main == `5eca67e` · working tree clean | 확인 |
+    | `5eca67e` API 이미지 GHCR 존재 | `sha256:7044be7d…`, CI publish + 기동검사 success |
+    | 그 이미지 실제 기동 | `docker run … import app.main` 통과 |
+    | 그 이미지 + 실데이터 + 실 OSRM 계약 | 아래 참조 |
+    | production health · `data_version` | `ok` · `2026Q3-cc-03` |
+    | OSRM 그래프 재사용 | `v5.27.1` 컨테이너 3일 가동, `/srv/geoleobom/data` ro 마운트 그대로 |
+    | `deploy/` 변경 | **0 파일** |
+    | 롤백 대상 | `0699eff`(현재 운영, 즉시 복귀 대상)·`b070bcb`(Week 3) 이미지 모두 GHCR에 존재. `web/previous = b070bcb`, `.env.before-this-deploy`·`.env.previous` 존재 |
+
+    **배포 대상 이미지로 확인한 계약**(실데이터 `2026Q3-cc-03` + 실 OSRM, 45시설):
+    `best`·`top3` 전부 `lon`·`lat` 존재 / GeoPackage 원본 POI와 **45/45 정확히 일치** / `snapped_dest`와 섞이지 않음 **45/45**(모두 1m 초과로 떨어짐) / `geometry` 끝 == `snapped_dest` **45/45**(6자리 한 눈금) / `analyze.snapped == route.snapped_origin` **45/45** / `walk_seconds`·`walk_m`·`straight_m` 정수 · `detour_flag` bool.
+    **운영(`0699eff`)과 계산값 대조**: 3좌표 45시설의 `fid`·`name`·`walk_seconds`·`walk_m`·`straight_m`·`detour_flag`와 `versions`·`snapped`·`density`가 **전부 동일**했다. 차이는 `lon`·`lat` 추가뿐이다. `deploy/smoke.py --baseline 2026Q3-cc-03`도 배포 대상 이미지에서 통과했다(기준값 재기록 없음).
+
+  - **배포 후 스모크에 추가할 항목 (목적지 POI 표시).** 기존 Week 4 스모크에 아래만 더한다. 실제 사람 위치는 쓰지 않고 합성·공개 좌표만 쓴다.
+    1. `/api/analyze`로 대표 시설의 POI 좌표(`Facility.lon`·`lat`)를 얻는다.
+    2. 같은 `fid`로 `/api/route`를 불러 `snapped_dest`를 얻는다.
+    3. **POI와 snap이 실제로 다른 표본**을 고른다 — 공주대 정문 `36.47130,127.14020`의 약국(비타민약국)이 약 21m로 적절하다.
+    4. `route geometry` 마지막 점 == `snapped_dest` (6자리 한 눈금).
+    5. 지도의 16px 링 좌표 == `Facility.lon`·`lat` (geometry 끝이 아니다).
+    6. 10~30m 표본에서 링과 선 끝이 **실제로 분리되어 보인다**(링이 경로선 bbox 밖).
+    7. 링까지 포함한 framing — 링이 화면 밖으로 나가지 않는다(시트·상단바를 뺀 가시영역 안).
+
   - **미확인:** 실기기 iOS Safari·Android Chrome. 운영 확인은 데스크톱 Edge(Chromium) + 가상 geolocation이다.
+  - **알려진 residual:** 대형 공원은 POI가 면 중심점이라 접근점과의 거리가 커질 수 있다. 카테고리 예외를 만들지 않았고 면형 POI 정책으로 따로 다룬다(DESIGN.md §7-1).
   - **정하지 않은 것:** 비교 열 간 `versions` 불일치의 재분석 여부(v2.5 부록 G). 비교표 PR은 이 결정을 만들지 않았다(표시 규칙만).
 
 - **규약 개정 기록: Week 4 UI/UX 재설계 — 문서 단계 (2026-09-14, Fable 5.1).**
