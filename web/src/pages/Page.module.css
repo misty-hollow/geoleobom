@@ -58,6 +58,62 @@
   color: var(--ink-500);
 }
 
+/*
+ * 비교 화면 골격 (DESIGN.md 14절, Week 4). 헤더 → trust → 표 → METHOD_NOTICE를 뷰포트 높이 안에
+ * 세우고 표 컨테이너가 남은 높이를 쓴다. 그래야 thead·첫 열·tfoot sticky의 기준이 표 컨테이너
+ * 하나가 된다. `.page` 뒤에 두어 min-height·padding을 덮는다.
+ */
+.compareShell {
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+
+.compareInner {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+/* trust는 제목 아래 --s-2, 표 위 --s-3 (13절). 접지 않는다. */
+.compareTrust {
+  padding: var(--s-2) var(--pad-x) var(--s-3);
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
+}
+
+.trustBone {
+  display: inline-block;
+  width: 168px;
+  max-width: 100%;
+  height: 12px;
+  vertical-align: middle;
+  border-radius: var(--r-1);
+  background: var(--canvas);
+}
+
+/* 표는 내용만큼만 높고(늘리지 않는다), 뷰포트가 모자라면 줄어들어 안에서 스크롤한다. */
+.compareInner > [data-compare-frame] {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.compareInner > [data-compare-frame] > [data-compare-scroll] {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.compareShell .method {
+  flex: 0 0 auto;
+  padding-bottom: calc(var(--safe-bottom) + var(--s-3));
+}
+
 .method {
   padding: var(--s-3) var(--pad-x) 0;
   font-size: var(--t-caption);

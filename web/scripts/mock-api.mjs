@@ -102,6 +102,8 @@ function compareColumn(body, lon) {
       set('medical', ok(fac(411, '공주신관의원', 540, 620, 580)))
       set('park', ok(fac(511, '신관공원', 840, 1010, 900)))
       body.density = complete(17)
+      // 열 2만 기준일이 다르다(2026-06-30). 비교 trust는 전체 최솟값(2022-11-21) 한 줄만 적어야 한다(DESIGN.md 13절).
+      body.versions = { ...body.versions, poi_date: '2026-06-30' }
       break
     case 2:
       set('convenience', ok(fac(121, 'CU 옥룡점', 180, 200, 190)))

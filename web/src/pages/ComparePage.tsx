@@ -71,9 +71,19 @@ export function ComparePage() {
   const [shareOpen, setShareOpen] = useState(false)
   const announcer = useAnnouncer()
 
-  const dates = Array.from(
-    new Set(columns.filter((c): c is Extract<CompareColumnState, { kind: 'ready' }> => c.kind === 'ready').map((c) => c.data.versions.poi_date)),
-  ).sort()
+  // 기준일은 **비교 후보 전체의 가장 오래된 하나**만 적는다(DESIGN.md 13절, 결정 8 — 같은 라벨을
+  // 여러 줄 반복하면 "가장 오래된"이 여러 개가 된다). 그 문구는 전체 최솟값의 의미이므로
+  // **모든 열이 ready일 때만** 확정한다. 열 하나라도 답이 없거나(loading) 최종 실패(failed)면
+  // 성공한 일부의 날짜를 최종값처럼 적지 않고 자리만 잡아 둔다(줄 수·높이는 그대로).
+  const loadingAny = columns.some((c) => c.kind === 'loading')
+  const allReady = columns.length > 0 && columns.every((c) => c.kind === 'ready')
+  const oldestDate = allReady
+    ? columns.reduce<string | null>((oldest, c) => {
+        if (c.kind !== 'ready') return oldest
+        const date = c.data.versions.poi_date
+        return oldest === null || date < oldest ? date : oldest
+      }, null)
+    : null
 
   if (parsed.points.length === 0) {
     return (
@@ -99,8 +109,10 @@ export function ComparePage() {
   const shareUrl = `${window.location.origin}${location.pathname}${location.search}`
 
   return (
-    <main className={styles.page}>
-      <div className={styles.inner}>
+    // 헤더 → trust 2줄 → 표 → METHOD_NOTICE (DESIGN.md 14절 구조). 표 컨테이너 하나가 양축을
+    // 스크롤하므로 페이지는 뷰포트 높이에 맞추고 표가 남은 높이를 쓴다(sticky thead·tfoot의 기준).
+    <main className={`${styles.page} ${styles.compareShell}`}>
+      <div className={`${styles.inner} ${styles.compareInner}`}>
         <header className={styles.header}>
           <Button variant="icon" aria-label={ko.search.back} onClick={() => navigate('/')}>
             <Icon name="back" />
@@ -113,16 +125,22 @@ export function ComparePage() {
 
         {parsed.truncated && <p className={styles.notice}>{ko.compare.tooMany}</p>}
 
-        <CompareTable columns={columns} />
-
-        <div className={styles.trust}>
-          {dates.map((date) => (
-            <p key={date} className={styles.trustLine}>
-              {poiDateLabel(date)}
-            </p>
-          ))}
+        <div className={styles.compareTrust} data-compare-trust>
+          <p className={styles.trustLine}>
+            {loadingAny ? (
+              <span className={styles.trustBone} role="img" aria-label={ko.compare.loadingCell} />
+            ) : oldestDate !== null ? (
+              poiDateLabel(oldestDate)
+            ) : (
+              // 열 하나라도 최종 실패 — 전체 최솟값을 알 수 없다. 새 문구 없이 중립 자리만 유지한다.
+              <span className={styles.trustBone} aria-hidden="true" data-trust-unknown />
+            )}
+          </p>
           <p className={styles.trustEstimate}>{ko.trust.estimate}</p>
         </div>
+
+        <CompareTable columns={columns} />
+
         <p className={styles.method}>{METHOD_NOTICE}</p>
       </div>
 

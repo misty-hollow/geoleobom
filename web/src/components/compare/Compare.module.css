@@ -1,63 +1,100 @@
-/* 비교표 (DESIGN.md 14절, 보정 B: 후보 열 72~80, 스크롤 허용) */
+/*
+ * 비교표 (DESIGN.md 14절, Week 4 — 2026-09-14 확정).
+ *
+ * 구조: `.frame`(신호 오버레이의 기준 상자) > `.scroll`(양축 스크롤 컨테이너 하나) > table.
+ *   - thead `top:0`·첫 열 `left:0`은 언제나 sticky. tfoot `bottom:0`은 **뷰포트 높이 ≥640**에서만
+ *     sticky(M2 — 320×568에서 footer가 본문 행을 가리면 마지막 행처럼 보인다).
+ *   - z: 모서리 3 > 첫 열 2 > 헤더·footer 1. sticky 셀은 전부 불투명(paper).
+ *   - 표는 `border-collapse: separate`다. collapse 상태에서는 sticky 셀의 선이 셀과 함께 움직이지
+ *     않아 교차점에서 선이 비친다. 선은 셀의 border-bottom 하나로 그린다.
+ *   - 가장자리 신호(M4): `.edge*`는 폭·높이 0인 오버레이에 `--shadow-1`을 그대로 얹고, 보여야 하는
+ *     쪽만 `clip-path`로 남긴다. 새 그림자 값·그라디언트·화살표·문장은 없다.
+ */
 
-.scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+.frame {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
   background: var(--paper);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+}
+
+.scroll {
+  overflow: auto;
+  max-height: 100%;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scroll-padding-left: var(--compare-first-col);
 }
 
 .table {
   width: 100%;
   /* 최소 폭은 CompareTable이 열 수로 계산해 inline style로 준다(첫 열 + n × --compare-col-min). */
   table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .table th,
 .table td {
-  /* 좌우 4: 76px 열에 `127.14020`(12px tabular) 한 줄과 상태 문구 2줄이 들어가야 한다. */
+  /* 좌우 4(14절): 72px 열에 `127.14020`(12px tabular) 한 줄과 상태 문구 2줄이 들어간다. */
   padding: var(--s-2) var(--s-1);
   vertical-align: middle;
   text-align: right;
+  background: var(--paper);
   border-bottom: 1px solid var(--line);
   font-weight: var(--w-400);
 }
 
-.table tr:last-child th,
-.table tr:last-child td {
-  border-bottom: 0;
-}
+/* --- 첫 열 (항상 sticky, z 2) --- */
 
 .first {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 2;
   width: var(--compare-first-col);
   min-width: var(--compare-first-col);
   text-align: left;
-  background: var(--paper);
-  box-shadow: 1px 0 0 var(--line);
   font-size: var(--t-body-s);
   line-height: var(--lh-body-s);
   color: var(--ink-500);
-  padding-left: var(--pad-x);
+}
+
+/* 라벨은 단어 안에서 꺾이지 않는다(M5). 맞지 않으면 첫 열 폭을 올리고, 라벨을 줄이지 않는다. */
+.firstLabel,
+.firstSub {
+  display: block;
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
 }
 
 .firstSub {
-  display: block;
   font-size: var(--t-caption);
   line-height: var(--lh-caption);
   color: var(--ink-500);
 }
 
+/* --- 헤더 (항상 sticky, z 1; 모서리 z 3) --- */
+
 .head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--compare-head-h);
   vertical-align: bottom;
-  height: 64px;
+  scroll-snap-align: start;
+}
+
+.head.first {
+  z-index: 3;
+  scroll-snap-align: none;
 }
 
 .headItem {
   font-size: var(--t-caption);
+  line-height: var(--lh-caption);
   color: var(--ink-500);
 }
 
@@ -65,30 +102,55 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0;
-  color: var(--ink-900);
-  min-height: var(--tap);
   justify-content: flex-end;
+  gap: 0;
+  width: 100%;
+  min-height: var(--tap);
+  color: var(--ink-900);
 }
 
-.headName {
-  font-size: var(--t-body-s);
-  line-height: var(--lh-body-s);
+.headTag {
+  font-size: var(--t-caption);
+  line-height: var(--lh-caption);
   font-weight: var(--w-600);
+  color: var(--ink-500);
 }
 
 /*
- * 세션 표기 한 줄 (DESIGN.md 23·14절 후보 헤더). 이름이 길어도 열 폭을 밀지 않게
- * 한 줄로 자른다 — 줄 수·`title` 같은 14절의 나머지는 비교표 재설계에서 다룬다.
+ * 세션 장소명(23절). ≤767: 2줄(20×2), 한국어 단어를 깨지 않고, 넘치면 둘째 줄 끝에서 자른다(M3 —
+ * 1줄이면 72~85px 열에서 "공주대 …"로 잘려 신관·옥룡캠퍼스를 구분하지 못한다). ≥768: 1줄 + title.
  */
 .headPlace {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   max-width: 100%;
+  max-height: calc(var(--lh-body-s) * 2);
+  overflow: hidden;
   font-size: var(--t-body-s);
   line-height: var(--lh-body-s);
   color: var(--ink-900);
+  text-align: right;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* 출처 라벨(`지도에서 고른 위치`·`공유된 위치`)은 ≥768에서만. 모바일은 좌표가 그 자리로 올라온다. */
+.headSource {
+  display: none;
+  max-width: 100%;
+  font-size: var(--t-body-s);
+  line-height: var(--lh-body-s);
+  color: var(--ink-500);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.headCoords {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
 }
 
 .headCoord {
@@ -99,9 +161,13 @@
   white-space: nowrap;
 }
 
+.headCoordSep {
+  display: none;
+}
+
+/* --- 값 셀 --- */
+
 .cell {
-  width: var(--compare-col);
-  min-width: var(--compare-col);
   min-height: var(--row-h);
   height: var(--row-h);
   font-variant-numeric: tabular-nums;
@@ -131,6 +197,7 @@
   color: var(--muted-700);
 }
 
+/* 강조 셀(M1): 600 + accent + 배경 accent-100 + 하단 2px + sr-only. 아이콘 없음. */
 .best {
   background: var(--accent-100);
   box-shadow: inset 0 -2px 0 var(--accent-600);
@@ -159,9 +226,27 @@
   background: var(--canvas);
 }
 
-.dominantRow th,
-.dominantRow td {
+/* --- 우세 항목 footer (tfoot) --- */
+
+.foot {
   border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.foot.first {
+  z-index: 2;
+}
+
+/* ≥640: footer가 아래에 붙는다. 그 아래에서는 일반 흐름(M2). */
+@media (min-height: 640px) {
+  .foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+  }
+  .foot.first {
+    z-index: 3;
+  }
 }
 
 .dominant {
@@ -181,17 +266,85 @@
   color: var(--ink-500);
 }
 
+/* --- 가장자리 신호 오버레이 (M4) --- */
+
+.edge {
+  position: absolute;
+  pointer-events: none;
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+}
+
+.edgeOn {
+  opacity: 1;
+}
+
+/* 우측: 더 스크롤할 열이 있다. 그림자의 왼쪽 성분만 남긴다. */
+.edgeRight {
+  top: 0;
+  bottom: 0;
+  width: 0;
+  clip-path: inset(0 0 0 -16px);
+}
+
+/* 첫 열 우측: `scrollLeft > 0`. 그림자의 오른쪽 성분만 남긴다. */
+.edgeFirst {
+  top: 0;
+  bottom: 0;
+  width: 0;
+  clip-path: inset(0 -16px 0 0);
+}
+
+/* footer 위: sticky footer 아래로 내용이 지나가는 동안. 그림자의 위쪽 성분만 남긴다. */
+.edgeFoot {
+  left: 0;
+  right: 0;
+  height: 0;
+  clip-path: inset(-16px 0 0 0);
+}
+
+@media (max-height: 639px) {
+  .edgeFoot {
+    display: none;
+  }
+}
+
+/* --- ≥768 --- */
+
 @media (min-width: 768px) {
   .table {
     table-layout: auto;
   }
   .cell {
-    width: auto;
     min-width: var(--compare-col-wide);
   }
-  /* 첫 열 120: 768에서 첫 열 + 4 × 160 = 760이 화면에 들어간다(160이면 800으로 4열째가 잘린다). */
+  /* 첫 열 120: 768에서 120 + 4 × 160 = 760이 화면에 들어간다. */
   .first {
     width: var(--compare-first-col-wide);
     min-width: var(--compare-first-col-wide);
+  }
+  .scroll {
+    scroll-padding-left: var(--compare-first-col-wide);
+  }
+  .head {
+    height: var(--compare-head-h-wide);
+  }
+  .headPlace {
+    display: block;
+    -webkit-line-clamp: unset;
+    max-height: var(--lh-body-s);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow-wrap: normal;
+  }
+  .headSource {
+    display: block;
+  }
+  .headCoords {
+    flex-direction: row;
+    gap: 0;
+  }
+  .headCoordSep {
+    display: inline;
   }
 }

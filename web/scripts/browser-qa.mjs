@@ -772,7 +772,7 @@ async function main() {
     })
     check(`${vp.name}: 비교 첫 열 sticky(스크롤 후 위치 불변)`, table.stickyDelta === 0 || !table.scrollable, JSON.stringify(table))
     const cells = await page.evaluate(() => {
-      const coords = Array.from(document.querySelectorAll('thead a span:nth-child(2), thead a span:nth-child(3)')).map((s) => Math.round(s.getBoundingClientRect().height))
+      const coords = Array.from(document.querySelectorAll('thead a [data-place-coords] > span')).map((s) => Math.round(s.getBoundingClientRect().height))
       const statuses = Array.from(document.querySelectorAll('td span')).filter((s) => /확인 필요|도달 경로 없음|반경 내 없음|집계 미완료/.test(s.textContent)).map((s) => ({ t: s.textContent, h: Math.round(s.getBoundingClientRect().height) }))
       const colW = Array.from(document.querySelectorAll('tbody tr:first-child td')).map((td) => Math.round(td.getBoundingClientRect().width))
       return { coords, statuses, colW }
@@ -780,8 +780,8 @@ async function main() {
     check(`${vp.name}: 비교 헤더 좌표 한 줄(16px)`, cells.coords.length === 8 && cells.coords.every((h) => h === 16), JSON.stringify(cells.coords))
     check(`${vp.name}: 비교 상태 셀 ≤2줄(≤40px)`, cells.statuses.length > 0 && cells.statuses.every((c) => c.h <= 40), JSON.stringify(cells.statuses))
     check(`${vp.name}: 비교 후보 열 폭 ≥72`, cells.colW.every((w) => w >= 72), JSON.stringify(cells.colW))
-    const dominant = await page.$$eval('tbody tr:last-child td', (tds) => tds.map((td) => td.textContent.trim()))
-    check(`${vp.name}: 우세 항목 0/1/3/0`, JSON.stringify(dominant) === JSON.stringify(['0개', '1개', '3개', '0개']), JSON.stringify(dominant))
+    const dominant = await page.$$eval('tfoot td', (tds) => tds.map((td) => td.textContent.trim()))
+    check(`${vp.name}: 우세 항목(tfoot) 0/1/3/0`, JSON.stringify(dominant) === JSON.stringify(['0개', '1개', '3개', '0개']), JSON.stringify(dominant))
     note(`${vp.name}: 비교표 가로 스크롤`, table.scrollable ? `스크롤 발생 (${table.scrollWidth}>${table.clientWidth}) — 허용` : '무스크롤')
     check(`${vp.name}: 강조 셀 = 편의점 3분·마트 5분·의료 9분·공원 6분 (동률·20+ 무강조)`, JSON.stringify(table.bestCells.map((t) => t.replace(/ ?가장 짧음| ?가장 많음/, ''))) === JSON.stringify(['3분', '5분', '9분', '6분']), JSON.stringify(table.bestCells))
     await shot(page, `${vp.name}-16b-compare-scrolled`)
