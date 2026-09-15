@@ -789,6 +789,40 @@ async function main() {
     await page.waitForSelector('text=핀을 옮겨 정확한 곳을 골라 주세요')
     const warnText = await page.evaluate(() => Array.from(document.querySelectorAll('p')).map((p) => p.textContent.trim()).find((t) => t.startsWith('위치 오차가')))
     check(`${vp.name}: 오차 경고 §22 표기`, warnText === '위치 오차가 3.5km예요. 핀을 옮겨 정확한 곳을 골라 주세요', String(warnText))
+    await page.waitForTimeout(350)
+    // 경고가 있어도 peek 132 안에 경고·좌표·48px 버튼이 **전부** 보여야 한다(UX 검토 blocker 2026-09-15:
+    // 경고 줄이 버튼을 뷰포트 아래로 밀었다). DOM 존재가 아니라 실제 상자로 본다. 데스크톱(≥960)은 패널이라 제외.
+    if (vp.width < 960) {
+      const geo = await page.evaluate(() => {
+        const r = (el) => el.getBoundingClientRect()
+        const sheet = document.querySelector('section[data-snap]')
+        const bar = document.querySelector('[data-pending-bar="warned"]')
+        const warn = bar?.querySelector('p[role="status"]')
+        const coord = warn?.nextElementSibling
+        const button = Array.from(bar?.querySelectorAll('button') ?? []).find((b) => b.textContent.trim() === '여기 분석')
+        if (!sheet || !bar || !warn || !coord || !button) return null
+        const visibleTop = r(sheet).top
+        const handleBottom = visibleTop + 24
+        const bottom = window.innerHeight
+        const focusRing = 4 // outline 2 + offset 2 (base.css :focus-visible)
+        return {
+          snap: sheet.dataset.snap,
+          sheetVisibleHeight: Math.round(bottom - visibleTop),
+          warn: { top: Math.round(r(warn).top), bottom: Math.round(r(warn).bottom), h: Math.round(r(warn).height), lines: Math.round(r(warn.querySelector('span')).height / 16), textOverflow: warn.querySelector('span').scrollWidth > warn.querySelector('span').clientWidth + 1 },
+          coord: { top: Math.round(r(coord).top), bottom: Math.round(r(coord).bottom) },
+          button: { top: Math.round(r(button).top), bottom: Math.round(r(button).bottom), h: Math.round(r(button).height), w: Math.round(r(button).width) },
+          handleBottom: Math.round(handleBottom),
+          bottom,
+          ringFits: r(button).bottom + focusRing <= bottom + 0.5,
+          docOverflow: document.documentElement.scrollWidth > window.innerWidth,
+        }
+      })
+      check(`${vp.name}: 오차 경고 peek — 시트 높이 132 유지(peek)`, geo !== null && geo.snap === 'peek' && geo.sheetVisibleHeight === 132, JSON.stringify(geo))
+      check(`${vp.name}: 오차 경고 peek — 경고 전체가 핸들 아래·시트 안(≤2줄, 글자 넘침 없음)`, geo !== null && geo.warn.top >= geo.handleBottom - 0.5 && geo.warn.bottom <= geo.bottom && geo.warn.lines <= 2 && geo.warn.h <= 36 && !geo.warn.textOverflow, JSON.stringify(geo?.warn))
+      check(`${vp.name}: 오차 경고 peek — 좌표 줄이 경고 아래·버튼 위에 온전히`, geo !== null && geo.coord.top >= geo.warn.bottom - 0.5 && geo.coord.bottom <= geo.button.top + 0.5, JSON.stringify(geo?.coord))
+      check(`${vp.name}: 오차 경고 peek — 여기 분석 48px 전체 + 포커스 링 4px이 뷰포트 안`, geo !== null && geo.button.h === 48 && geo.button.top >= geo.coord.bottom - 0.5 && geo.ringFits, JSON.stringify(geo?.button) + ` bottom=${geo?.bottom}`)
+      check(`${vp.name}: 오차 경고 peek — 페이지 가로 넘침 없음`, geo !== null && geo.docOverflow === false)
+    }
     await shot(page, `${vp.name}-19-locate-inaccurate`)
 
     // 4) `여기 분석`으로만 확정된다.

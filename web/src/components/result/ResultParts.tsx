@@ -248,14 +248,19 @@ export function LoadingStrip() {
  * 데스크톱·Wi-Fi 추정은 2,000~5,000m로 오므로 `3.5km`처럼 읽혀야 한다. 정확도 원은
  * 그리지 않는다(24절: 장식·"파란 원 = 나" 관습 회피).
  */
-export function AccuracyWarning({ accuracyM }: { accuracyM: number | null }) {
-  if (accuracyM === null || accuracyM <= ACCURACY_WARN_M) return null
+export function AccuracyWarning({ accuracyM, compact = false }: { accuracyM: number | null; compact?: boolean }) {
+  if (!isInaccurate(accuracyM)) return null
   return (
-    <p className={styles.warnBand} role="status">
+    // compact: 모바일 peek(132) 안에 좌표·48px 버튼과 함께 들어가야 하는 자리. 문구·글자 크기·아이콘은 같다.
+    <p className={[styles.warnBand, compact ? styles.warnBandCompact : ''].join(' ').trim()} role="status">
       <Icon name="snap" size={16} />
-      <span>{ko.locate.inaccurate(distanceText(accuracyM))}</span>
+      <span>{ko.locate.inaccurate(distanceText(accuracyM as number))}</span>
     </p>
   )
+}
+
+function isInaccurate(accuracyM: number | null): boolean {
+  return accuracyM !== null && accuracyM > ACCURACY_WARN_M
 }
 
 export function PendingBar({
@@ -268,9 +273,10 @@ export function PendingBar({
   /** 현위치에서 온 pending이면 브라우저가 말한 반경(m). 그 밖에는 `null`이다. */
   accuracyM?: number | null
 }) {
+  const warned = isInaccurate(accuracyM)
   return (
-    <div className={styles.peek}>
-      <AccuracyWarning accuracyM={accuracyM} />
+    <div className={[styles.peek, warned ? styles.peekWarned : ''].join(' ').trim()} data-pending-bar={warned ? 'warned' : 'plain'}>
+      <AccuracyWarning accuracyM={accuracyM} compact />
       <p className={styles.pendingCoord}>
         <span>{ko.pending.label}</span>
         <span aria-hidden="true">·</span>

@@ -158,6 +158,20 @@
   margin-top: 0;
 }
 
+/*
+ * 모바일 peek 안의 현위치 오차 경고 (DESIGN.md 24절 inaccurate) — PendingBar 전용.
+ *
+ * peek는 132 단일(11절)이고 내용 영역은 108이다. 그 안에 경고(12/16, 2줄까지) + 좌표 줄(20) +
+ * 여기 분석(48)이 **전부** 들어가야 하며 버튼 아래에는 포커스 링(offset 2 + 두께 2 = 4)이 뷰포트
+ * 안에 남을 자리가 있어야 한다. 예산: 2줄 32 + 세로 패딩 2×2 = 36 · 좌표 20 · 버튼 48 · 링 4 = 108.
+ * 그래서 이 변형만 margin 0, 세로 패딩을 `--s-1`의 절반으로 둔다. TrustLine 위의 `.warnBand`
+ * (snap_warning)는 그대로다 — 공용 규칙을 눌러 다른 화면을 바꾸지 않는다.
+ */
+.warnBandCompact {
+  margin: 0;
+  padding: calc(var(--s-1) / 2) var(--s-2);
+}
+
 /* --- 행 (NearestRow / DensityRow) ----------------------------------------- */
 
 .rows {
@@ -500,6 +514,20 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+/*
+ * 경고 줄이 있는 PendingBar (24절 inaccurate). 132 안에 경고·좌표·48px 버튼을 다 넣는다.
+ * 2줄 경고(36) + 좌표(20) + 버튼(48) = 104 → 남는 4가 아래 패딩(포커스 링 자리). 1줄 경고(20)면
+ * 남는 16을 space-between이 두 틈에 8·8로 나눈다. 버튼을 줄이거나 글자를 자르지 않는다.
+ */
+.peekWarned {
+  justify-content: space-between;
+  padding-bottom: var(--s-1);
+}
+
+.peekWarned .pendingCoord {
+  padding-bottom: 0;
 }
 
 .hint {
