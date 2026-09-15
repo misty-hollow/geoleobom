@@ -1,6 +1,6 @@
 # 현재 상태 (STATUS.md)
 
-갱신: 2026-09-15 (Week 4 전체 main 병합 완료 · DEPLOY-CANDIDATE PASS, production 미배포). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
+갱신: 2026-09-15 (Week 4 production 배포 완료 — `0699eff`). 운영 변화·주간 정리·막힘·중단/인계 때 갱신한다.
 
 **이 파일은 현재 상태와 역사 기록을 함께 담는다.** 아래 "지금 동작하는 것"과 "현재
 작업과 다음 행동"이 현재이고, 날짜가 붙은 절(`## … (2026-09-12, …)` 등)은 **그때의
@@ -30,14 +30,19 @@
   - **세션 장소명(DESIGN.md §23) — main에 병합됐다.** PR #25, merge `46c048bc6a1ea5dafcff5a61461d665fa501f2f6`. 장소 표기(`name`·`source`)를 라우트보다 위(`App`)의 메모리 보관함으로 올리고, 결과 헤더·담은 후보 목록·비교 헤더가 **같은 resolver**를 쓴다. 저장 계층은 그대로다 — 후보는 계속 좌표만 최대 4개이고 이름·출처는 localStorage·sessionStorage·URL·`history.state` 어디에도 넣지 않는다. 새로고침하면 표기가 사라지고 좌표로 돌아간다.
   - **비교표 재설계(DESIGN.md §13·§14) — main에 병합됐다.** PR #26, merge `ab2928ccd62d21db9c3de57aaef6112133f06045`. 헤더 → trust 2줄(`poi_date` 전체 최솟값 한 줄) → 표 → METHOD_NOTICE 순서로 바로잡고, 후보 헤더(태그 → §23 이름 ≤767 2줄/≥768 1줄+`title` → 출처 라벨(≥768) → 좌표, 높이 100/80), 열 폭(첫 열 88·≤359 84·≥768 120, 후보 열 72 잠금 또는 균등), 우세 항목 `tfoot`(≥640에서만 sticky + 위쪽 선·그림자), thead·첫 열 항상 sticky, 가로 스크롤 가장자리 신호(`--shadow-1` 오버레이, 시작/중간/끝 전환), `scroll-snap x proximity`를 구현했다. 계산·API·우세 판정 의미는 그대로다. 브라우저 QA는 `npm run qa:compare`(8 뷰포트, mock API).
   - **현위치 입력(DESIGN.md §24) — main에 병합됐다.** PR #27, merge `e737e6816abcd248941197a486b97dc265c7e8ca`. 버튼을 눌렀을 때만 `getCurrentPosition` 1회이고, 얻은 좌표는 **기존 pending 핀 흐름**으로 들어가 `여기 분석`으로만 확정된다(확정 뒤 출처는 기존 `pin`). `watchPosition`·IP 추정·정확도 원·새 백엔드 API·새 오류 코드는 없다. 확정 전 좌표는 저장 4곳과 걸어봄 API 어디에도 가지 않으며, **지도 중심 검색(Search B)으로 우회 전송되는 경로도 막았다** — 미확정 현위치가 떠 있는 동안만 중심을 보내지 않고 확정하거나 지도를 탭하면 원래대로 돌아온다.
-  - **여섯 병합분(#23·#24·#25·#26·#27·#28) 모두 아직 production에 배포하지 않았다.** 운영은 여전히 `b070bcb`(Week 3 배포본)다. **Week 4의 승인된 구현 항목은 모두 main에 들어왔다.**
+  - **여섯 병합분(#23·#24·#25·#26·#27·#28)이 모두 production에 배포됐다** (2026-09-15). Week 4의 승인된 구현 항목은 모두 main에 있고, 이제 운영에도 있다.
   - **통합점검 Major 1건(경로 교체 프레이밍 회귀) — main에 병합됐다.** PR #28, merge `0699eff7c82d7b321d98f8ae0b28626286186b9d`. 실 Kakao SDK + 실 OSRM + 실데이터 768×1024·half 시트에서 시설을 바꾸면 새 경로 아랫부분이 시트 뒤로 들어갔다(재현: 경로 bottom 587 vs 시트 top 504, 83px). 원인은 카메라 규칙이 아니라 **`userMoved` 가드**다 — 실제 SDK가 `setBounds` 안에서 `zoom_changed`를 동기로 흘리는데 값 비교만 하던 가드가 그 순간 새 배율을 아직 적어 두지 못해 **우리 fit을 사용자 조작으로 셌다.** 그 뒤 모든 시설 전환이 "사용자가 잡아둔 배율" 규칙(목적지만 보이면 이동 없음)으로 들어갔다. 동기 구간을 깊이로 거르도록 가드만 고쳤고 §7-2 상태 머신은 그대로다.
-  - **현재 상태: DEPLOY-CANDIDATE PASS (2026-09-15 preflight).** 배포 대상은 `0699eff7c82d7b321d98f8ae0b28626286186b9d`이고 **Week 4 통합점검 blocker는 없다.**
-    - preflight에서 확인한 운영 사실: production 코드·web release·`.env.last-good` 모두 `b070bcb`(Week 3), 데이터 `current=2026Q3-cc-03`·`previous=2026Q3-cc-02`, OSRM `v5.27.1`, `/api/health` 정상, 공개 페이지 4종 200, Kakao REST 키 설정됨(값 미확인·미출력).
-    - 배포 범위는 **코드뿐이다** — `b070bcb..0699eff`에서 `api/app`은 `/api/search` 지도 중심 bias 2파일, `web/`은 Week 4 UI 44파일이며 `data/`·`deploy/` 변경은 **0건**이다. 데이터 교체·OSRM 재빌드·배포 규약 변경이 필요 없다.
-    - 롤백 준비: 대상 이미지(`0699eff`)와 롤백 이미지(`b070bcb`) 모두 GHCR에 존재한다. `web/previous`는 아직 없고 **`deploy_web.sh`가 배포 중 `previous ← current`로 만든다** — 그 뒤 Week 3 빌드로 즉시 복귀할 수 있다.
-  - **미확인:** 실기기 iOS Safari·Android Chrome. 데스크톱 Edge(Chromium)에서만 확인했다 — 배포 보류 사유로 보지 않는다.
-  - **남은 것:** 사용자 승인 뒤 운영 배포. 새 기능은 지정되지 않았다.
+  - **현재 상태: Week 4 production 배포 완료 (2026-09-15).** 배포 SHA `0699eff7c82d7b321d98f8ae0b28626286186b9d`. 판정 **DEPLOY SUCCESS**.
+    - **API**: `deploy/deploy_api.sh`로 배포. 내장 5좌표 스모크 통과 뒤에만 갱신되는 `.env.last-good`이 `0699eff`가 됐다. 컨테이너 이미지도 그 SHA로 확인했다.
+    - **web**: `deploy/deploy_web.sh`로 배포. `web/current → 0699eff…`, **`web/previous → b070bcb…`(Week 3 보존)**, 공개 자산 `assets/index-BMNpKZYk.js`.
+    - **데이터·OSRM은 건드리지 않았다** — `data/current = 2026Q3-cc-03`·`previous = 2026Q3-cc-02` 그대로이고 OSRM은 `v5.27.1` 컨테이너가 재생성 없이 계속 떠 있다(3일 가동).
+    - **API 스모크(운영, 합성값)**: health `ok`·`data_version` 유지 / `/api/search` 한쪽만 → **422**, 둘 다 → 200(대전 중심에서 신관캠퍼스 1위·천안 2위로 먼 정확 일치 보존) / `analyze.snapped == route.snapped_origin` / route geometry 첫 점 == snapped origin / `versions` 일치. 실패 0.
+    - **브라우저 스모크(운영, 390·768·1280)**: 42건 실패 0. 검색→분석→경로, top3 전환, 지도 탭→pending→`여기 분석`, 직접 `/p` 진입+reload, 담기→비교, 가로 넘침 없음, console error 0, 걸어봄 asset·API 4xx·5xx 0.
+    - **768 경로 교체 회귀는 운영에서 재확인했다** — half 시트에서 시설 전환 뒤 경로 bottom **428** ≤ 시트 top **504**(수정 전 재현값은 587 vs 504였다). 390도 344 ≤ 405.
+    - **현위치 개인정보(가상 좌표)**: 진입만으로 권한 요청 없음, 성공해도 pending만 생성되고 URL·저장 계층에 좌표 없음, **미확정 상태 검색이 `/api/search`에 GPS 좌표를 싣지 않음**.
+    - **로그 개인정보**: Caddy·API 로그에서 좌표·검색어·쿼리 문자열·`Referer`·`Cookie`·REST 키 **0건**, `remote_ip`는 `/24` 마스킹 유지(`183.107.204.0`), `client_ip` 미기록. 접근 로그의 `uri`는 `/api/search`처럼 경로 템플릿만 남는다.
+    - **롤백 준비**: code는 `.env.before-this-deploy`(=`b070bcb`)와 GHCR의 Week 3 이미지, web은 `web/previous`(=`b070bcb`)로 되돌릴 수 있다. 이번 배포에서 롤백은 **실행하지 않았다**.
+  - **미확인:** 실기기 iOS Safari·Android Chrome. 운영 확인은 데스크톱 Edge(Chromium) + 가상 geolocation이다.
   - **정하지 않은 것:** 비교 열 간 `versions` 불일치의 재분석 여부(v2.5 부록 G). 비교표 PR은 이 결정을 만들지 않았다(표시 규칙만).
 
 - **규약 개정 기록: Week 4 UI/UX 재설계 — 문서 단계 (2026-09-14, Fable 5.1).**
