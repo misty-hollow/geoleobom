@@ -56,6 +56,13 @@ class Facility(BaseModel):
     walk_m: int
     straight_m: int
     detour_flag: bool
+    lon: float = Field(
+        description=(
+            "시설 자체의 좌표(GeoPackage 배포본 원본). 보행망 스냅 지점이 아니다 — "
+            "`/api/route`의 `snapped_dest`·geometry 마지막 점과 다를 수 있다"
+        )
+    )
+    lat: float = Field(description="시설 자체의 좌표. `lon` 설명과 같다")
 
 
 class NearestItem(BaseModel):

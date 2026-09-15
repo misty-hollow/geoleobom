@@ -35,8 +35,35 @@ const fac = (fid, name, walk_seconds, walk_m, straight_m, detour_flag = false) =
   detour_flag,
 })
 
+/** 위도 1도 ≈ 111,320m. */
+const DEG_PER_M = 1 / 111_320
+/** `/api/route`가 fid로 목적지를 옮기는 식. `route()`와 `poiOf()`가 같은 값을 쓴다. */
+const destOffset = (fid) => ({ dx: ((fid % 7) - 3) * 0.0012, dy: ((fid % 5) - 2) * 0.0009 - 0.002 })
+
+/**
+ * 시설 자체의 POI 좌표 — 경로 목적지 스냅에서 **북쪽으로 약 20m**.
+ *
+ * 실제 그래프가 그렇다: 시설은 건물 안, 보행망 접근점은 도로 위. 모의 응답도 그 관계를
+ * 지켜야 브라우저 QA가 "링이 어느 쪽에 놓이는가"를 볼 수 있다. 같은 값으로 두면 링을
+ * 선 끝에 놓는 예전 구현도 통과한다.
+ */
+function poiOf(lon, lat, fid) {
+  const { dx, dy } = destOffset(fid)
+  return { lon: lon + dx, lat: lat + dy + 20 * DEG_PER_M }
+}
+
+/** 응답의 모든 시설에 원본 POI 좌표를 채운다(v2.5 4-4 `Facility.lon`/`lat`). */
+function withPoi(body, lon, lat) {
+  for (const item of body.nearest ?? []) {
+    if (item.best) Object.assign(item.best, poiOf(lon, lat, item.best.fid))
+    for (const f of item.top3 ?? []) Object.assign(f, poiOf(lon, lat, f.fid))
+  }
+  return body
+}
+
 function typical(lon, lat) {
-  return {
+  // 모든 갈래가 이 함수를 거친다. POI 채우기를 여기 한 곳에서 한다.
+  return withPoi({
     input: { lon, lat },
     snapped: { lon: lon + 0.00005, lat: lat - 0.00002, snap_distance_m: 6.2 },
     region: { supported: true, label: '충청권', verified_area: false },
@@ -82,7 +109,7 @@ function typical(lon, lat) {
       candidates_total: 57,
     },
     computed_at: new Date().toISOString(),
-  }
+  }, lon, lat)
 }
 
 /** 비교표 QA용 열 변형(위 헤더). 열 1은 typical() 그대로다. */
@@ -168,15 +195,15 @@ function variant(lon, lat) {
       return { status: 200, body }
     }
     default:
-      return { status: 200, body: compareColumn(typical(lon, lat), lon) }
+      // `compareColumn`이 시설을 통째로 갈아 끼우므로 POI를 **그 뒤에** 다시 채운다.
+      return { status: 200, body: withPoi(compareColumn(typical(lon, lat), lon), lon, lat) }
   }
 }
 
 function route(lon, lat, fid) {
   if (fid === 999) return { status: 404, body: { detail: 'route fid not found' } }
   const versions = fid === 998 ? { ...VERSIONS, data_version: '2026Q3-cc-04' } : VERSIONS
-  const dx = ((fid % 7) - 3) * 0.0012
-  const dy = ((fid % 5) - 2) * 0.0009 - 0.002
+  const { dx, dy } = destOffset(fid)
   return {
     status: 200,
     body: {

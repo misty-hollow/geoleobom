@@ -28,12 +28,32 @@ export const OTHER_VERSIONS: Versions = {
   poi_date: '2026-06-30',
 }
 
+/** 위도 1도 ≈ 111,320m. 픽스처가 "몇 m 떨어졌나"를 적을 때 쓴다. */
+const DEG_PER_M = 1 / 111_320
+
+/**
+ * `fid` 시설의 **POI 좌표** — `routeFor(fid)`의 경로 끝에서 북쪽으로 약 20m.
+ *
+ * 실제 그래프가 늘 그렇다: 시설은 건물 안에 있고 보행망 접근점은 도로 위에 있어
+ * 둘이 10~30m 떨어진다(사용자가 처음 발견한 약국 사례가 그 크기였다). 픽스처가 그
+ * 상태를 모델링해야 "링이 어느 쪽에 놓이는가"를 검사할 수 있다 — 두 값을 같게 두면
+ * 링을 선 끝에 놓는 예전 구현도 통과한다.
+ *
+ * `routeFor`와 **같은 `fid` 식**을 쓴다. 시설마다 자리가 달라야 시설 전환에서 링이
+ * 따라 움직이는 것을 볼 수 있다.
+ */
+export function facilityPoi(fid: number): { lon: number; lat: number } {
+  return { lon: 127.1412 + fid / 1e6, lat: 36.4708 + 20 * DEG_PER_M }
+}
+
+/** 시설 하나. `lon`/`lat`는 **시설 자체의 POI 좌표**다(v2.5 4-4, `facilityPoi`). */
 export function facility(over: Partial<Facility> & { fid: number; name: string }): Facility {
   return {
     walk_seconds: 240,
     walk_m: 290,
     straight_m: 250,
     detour_flag: false,
+    ...facilityPoi(over.fid),
     ...over,
   }
 }

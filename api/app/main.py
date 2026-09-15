@@ -281,4 +281,7 @@ def _facility(facility: FacilityResult | None) -> Facility | None:
         walk_m=facility.walk_m,
         straight_m=facility.straight_m,
         detour_flag=facility.detour_flag,
+        # 원본 POI 좌표. `_snapped()`가 내보내는 스냅 좌표와 섞지 않는다.
+        lon=facility.lon,
+        lat=facility.lat,
     )

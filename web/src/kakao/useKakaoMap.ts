@@ -86,6 +86,23 @@ export interface MapRoute {
    */
   line: LonLatPair[]
   /**
+   * 목적지 링을 놓을 자리 — **선택한 시설의 실제 POI 좌표**(`Facility.lon`/`lat`).
+   *
+   * 선의 마지막 점이 아니다. 그 점은 OSRM이 고른 **보행망 접근점**이고, 시설은 보통
+   * 거기서 10~30m 떨어진 건물 안에 있다(충청권 OSM에 보도 geometry가 적어 접근점이
+   * 도로 중심선에 붙는다). 예전에는 링을 선 끝에 놓아 **도로 한복판을 가리켰다.**
+   *
+   * 둘 사이를 선이나 점선으로 잇지 않는다 — POI↔접근점 직선이 실제로 걸어갈 수 있는
+   * 통로라는 보장이 없다. 접근점용 별도 마커도 만들지 않는다(선 끝 자체가 접근점이다).
+   *
+   * 없으면 선의 마지막 점으로 물러선다. 분석 응답에 그 시설이 더 이상 없는 경우
+   * (`versions` 불일치 직전 등)뿐이며, 정상 흐름에서는 항상 온다.
+   *
+   * `Point`가 아니라 `LonLatPair`인 이유는 `line`과 같다 — 서버가 돌려준 출력이라
+   * 5자리 정규화 대상이 아니고(v2.4 4-2), URL·저장소에 들어가지도 않는다.
+   */
+  destination?: LonLatPair
+  /**
    * 목적지 링의 `title` — `{카테고리} · {시설명}` (DESIGN.md 7-1).
    *
    * 지도 위에 **텍스트 라벨은 그리지 않는다**(7-1: 320px에서 겹친다). 시설명을 말하는
@@ -340,6 +357,19 @@ const PIN_H = 40
 const RING = 16
 /** 선 케이싱 9px의 절반. 선 끝이 가장자리에 딱 붙지 않게 한다. */
 const CASING_HALF = 5
+
+/**
+ * 목적지 링이 놓일 `[lon, lat]` — **시설 POI가 먼저다** (DESIGN.md 7-1).
+ *
+ * 그리기(`setRoute`)·bbox(`routeRects`)·fit(`fitBounds`) 세 곳이 반드시 같은 점을 써야
+ * 한다. 한 곳만 선 끝으로 남으면 "링은 시설에 있는데 화면 맞추기는 접근점 기준"이라는
+ * 어긋난 상태가 된다. 그래서 자리를 고르는 일을 이 함수 하나로 모은다.
+ */
+function destinationOf(route: MapRoute): LonLatPair {
+  if (route.destination !== undefined) return route.destination
+  const last = route.line[route.line.length - 1]
+  return [last[0], last[1]]
+}
 
 interface PixelRect {
   left: number
@@ -730,6 +760,9 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
    *
    * 마커는 좌표가 아니라 **그림**이라 배율과 무관한 픽셀 크기를 가진다. 좌표만으로
    * bbox를 잡으면 fit 직후에도 핀 머리가 상단바에 잘린다(DESIGN.md 7-2).
+   *
+   * **`dest`는 선 끝이 아니라 시설 POI다**(`destinationOf`). 선 끝만 넣으면 접근점은
+   * 화면 안인데 정작 사용자가 고른 시설 링은 밖인 상태를 "맞음"으로 판정한다.
    */
   const routeRects = useCallback(
     (route: MapRoute): { all: PixelRect; origin: PixelRect | null; dest: PixelRect } | null => {
@@ -754,8 +787,8 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
       }
       if (line === null) return null
 
-      const last = route.line[route.line.length - 1]
-      const end = at(last[0], last[1])
+      const [destLon, destLat] = destinationOf(route)
+      const end = at(destLon, destLat)
       const dest: PixelRect = {
         left: end.x - RING / 2,
         right: end.x + RING / 2,
@@ -789,6 +822,10 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
       if (route.origin !== undefined) {
         bounds.extend(new kakao.maps.LatLng(route.origin.lat, route.origin.lon))
       }
+      // 시설 POI는 선 위에 없다 — 접근점에서 10~30m 떨어져 있어 이 한 줄이 없으면
+      // 링이 화면 밖에 남는다(출발 핀에 `origin`을 넣는 것과 같은 이유).
+      const [destLon, destLat] = destinationOf(route)
+      bounds.extend(new kakao.maps.LatLng(destLat, destLon))
       // (bounds, top, right, bottom, left). 상단 24만 두면 플로팅 검색바 뒤로 선과 목적지가
       // 지나간다(실제 카카오 QA 2026-09-12, 390×844). 핀은 좌표에서 **위로 40px** 자라므로
       // 그 높이도 상단 패딩에 싣는다 — 아니면 fit 직후에도 핀 머리가 잘린다.
@@ -867,8 +904,10 @@ export function useKakaoMap(options: UseKakaoMapOptions = {}): KakaoMapHandle {
         strokeStyle: 'solid',
         zIndex: 2,
       })
+      // 링은 **시설 POI**에 놓는다. `path`의 마지막 점(= 보행망 접근점)이 아니다.
+      const [destLon, destLat] = destinationOf(route)
       destRef.current = new kakao.maps.Marker({
-        position: path[path.length - 1],
+        position: new kakao.maps.LatLng(destLat, destLon),
         map,
         title: route.destinationTitle,
         image: new kakao.maps.MarkerImage(
