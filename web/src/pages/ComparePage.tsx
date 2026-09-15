@@ -71,15 +71,19 @@ export function ComparePage() {
   const [shareOpen, setShareOpen] = useState(false)
   const announcer = useAnnouncer()
 
-  // 기준일은 **전체 후보 중 가장 오래된 하나**만 적는다(DESIGN.md 13절, 결정 8 — 같은 라벨을
-  // 여러 줄 반복하면 "가장 오래된"이 여러 개가 된다). 아직 답이 오지 않은 열이 있으면 준비된
-  // 일부만으로 최종 기준일인 것처럼 보이지 않게 자리만 bone으로 잡아 둔다(줄 수·높이는 그대로).
+  // 기준일은 **비교 후보 전체의 가장 오래된 하나**만 적는다(DESIGN.md 13절, 결정 8 — 같은 라벨을
+  // 여러 줄 반복하면 "가장 오래된"이 여러 개가 된다). 그 문구는 전체 최솟값의 의미이므로
+  // **모든 열이 ready일 때만** 확정한다. 열 하나라도 답이 없거나(loading) 최종 실패(failed)면
+  // 성공한 일부의 날짜를 최종값처럼 적지 않고 자리만 잡아 둔다(줄 수·높이는 그대로).
   const loadingAny = columns.some((c) => c.kind === 'loading')
-  const oldestDate = columns.reduce<string | null>((oldest, c) => {
-    if (c.kind !== 'ready') return oldest
-    const date = c.data.versions.poi_date
-    return oldest === null || date < oldest ? date : oldest
-  }, null)
+  const allReady = columns.length > 0 && columns.every((c) => c.kind === 'ready')
+  const oldestDate = allReady
+    ? columns.reduce<string | null>((oldest, c) => {
+        if (c.kind !== 'ready') return oldest
+        const date = c.data.versions.poi_date
+        return oldest === null || date < oldest ? date : oldest
+      }, null)
+    : null
 
   if (parsed.points.length === 0) {
     return (
@@ -128,8 +132,8 @@ export function ComparePage() {
             ) : oldestDate !== null ? (
               poiDateLabel(oldestDate)
             ) : (
-              // 전부 실패 — 기준일을 모른다. 라벨을 빈 값으로 만들지 않고 줄만 유지한다.
-              <span className={styles.trustBone} aria-hidden="true" />
+              // 열 하나라도 최종 실패 — 전체 최솟값을 알 수 없다. 새 문구 없이 중립 자리만 유지한다.
+              <span className={styles.trustBone} aria-hidden="true" data-trust-unknown />
             )}
           </p>
           <p className={styles.trustEstimate}>{ko.trust.estimate}</p>

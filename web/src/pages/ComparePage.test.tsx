@@ -177,7 +177,16 @@ describe('ComparePage', () => {
     expect(screen.getAllByText(/데이터 기준일\(가장 오래된 자료\)/)).toHaveLength(1)
   })
 
-  it('한 열이 실패하면 그 열은 실패 문구, 강조 없음, 기준일은 준비된 열의 값', async () => {
+  /** trust 2줄 구조: 기준일 줄 + estimate 줄. 기준일 줄은 날짜 문구 또는 자리 표시 하나다. */
+  function trustBlock() {
+    const block = screen.getByText('예상 도보시간이에요. 실제와 다를 수 있어요.').closest('[data-compare-trust]')!
+    const lines = block.querySelectorAll('p')
+    expect(lines).toHaveLength(2)
+    expect(lines[1].textContent).toBe('예상 도보시간이에요. 실제와 다를 수 있어요.')
+    return { block, dateLine: lines[0] }
+  }
+
+  it('한 열이 최종 실패(ready + failed)하면 성공한 열의 날짜를 전체 기준일처럼 확정하지 않는다', async () => {
     fetchMock.mockImplementation((input) => {
       const url = new URL(String(input), 'http://localhost')
       const lon = url.searchParams.get('lon') ?? ''
@@ -195,7 +204,43 @@ describe('ComparePage', () => {
     expect(convenience.map((c) => c.textContent)).toEqual(['4분', '불러오지 못했어요'])
     expect(convenience.every((c) => !c.className.includes('best'))).toBe(true)
     expect(cellsOf('우세 항목').map((c) => c.textContent)).toEqual(['–', '–'])
-    expect(screen.getByText('데이터 기준일(가장 오래된 자료): 2022-11-21')).toBeTruthy()
+    // 실패한 열의 기준일을 모르므로 전체 최솟값을 적을 수 없다. 새 문구 없이 자리만 유지한다.
+    expect(screen.queryByText(/데이터 기준일/)).toBeNull()
+    const { dateLine } = trustBlock()
+    expect(dateLine.textContent).toBe('')
+    expect(dateLine.querySelector('[data-trust-unknown]')).not.toBeNull()
+    expect(dateLine.querySelector('[role="img"]')).toBeNull()
+  })
+
+  it('모든 열이 실패하면 날짜 확정 표시가 없고 trust 2줄은 유지된다', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ code: 'OSRM_ERROR', message: 'osrm' }, 502)))
+    render(
+      <MemoryRouter initialEntries={['/c?p=36.47130,127.14020&p=36.46410,127.13060']}>
+        <App />
+      </MemoryRouter>,
+    )
+    await screen.findByRole('heading', { name: '후보 2곳 비교' })
+    await waitFor(() => expect(screen.queryAllByLabelText('불러오는 중')).toHaveLength(0))
+    expect(cellsOf('편의점').map((c) => c.textContent)).toEqual(['불러오지 못했어요', '불러오지 못했어요'])
+    expect(screen.queryByText(/데이터 기준일/)).toBeNull()
+    const { dateLine } = trustBlock()
+    expect(dateLine.textContent).toBe('')
+    expect(dateLine.querySelector('[data-trust-unknown]')).not.toBeNull()
+  })
+
+  it('모든 열이 ready이고 poi_date가 서로 다르면 전체 최솟값 정확히 한 줄', async () => {
+    // 열 1 = 2026-06-30(byLon 127.13060), 열 2 = 2022-11-21 → 최솟값 2022-11-21
+    render(
+      <MemoryRouter initialEntries={['/c?p=36.46410,127.13060&p=36.45720,127.12490']}>
+        <App />
+      </MemoryRouter>,
+    )
+    await screen.findByRole('heading', { name: '후보 2곳 비교' })
+    await waitFor(() => expect(screen.queryAllByLabelText('불러오는 중')).toHaveLength(0))
+    const { dateLine } = trustBlock()
+    expect(dateLine.textContent).toBe('데이터 기준일(가장 오래된 자료): 2022-11-21')
+    expect(screen.getAllByText(/데이터 기준일\(가장 오래된 자료\)/)).toHaveLength(1)
+    expect(screen.queryByText(/2026-06-30/)).toBeNull()
   })
 
   it('5번째 p는 무시하고 안내, 중복 제거, 1열이면 강조 없음', async () => {
