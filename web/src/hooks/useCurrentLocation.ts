@@ -27,6 +27,10 @@
  * 말하는 한 줄이며, 브라우저 요청 자체는 그대로 두고(끊을 방법이 없다) **결과의 권한만**
  * 빼앗는다. 늦게 온 성공도 실패도 그 뒤로는 아무것도 바꾸지 못한다(토스트도 없다).
  *
+ * 화면이 사라질 때도 같은 일을 한다. 언마운트는 "사용자가 다른 곳을 정했다"보다 더 분명한
+ * 폐기 사유이지만, **그때는 상태를 건드리지 않는다** — 이미 사라지는 화면에 setState를
+ * 하는 것이므로 세대 번호만 올려 등록된 콜백에서 권한을 뺏는다.
+ *
  * ## 실패는 두 갈래뿐이다
  *
  * 24절의 상태표대로 `PERMISSION_DENIED`는 `denied`(권한 안내), 그 밖(`POSITION_UNAVAILABLE`·
@@ -34,7 +38,7 @@
  * 두 가지(권한을 켜거나, 검색·지도로 고르거나)뿐이기 때문이다.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /** 24절: `accuracy > 200m`면 경고 줄을 띄운다. 실사용 뒤 조정 가능한 파라미터다. */
 export const ACCURACY_WARN_M = 200
@@ -98,6 +102,21 @@ export function useCurrentLocation({
     // 스피너를 끈다. 기다리던 결과를 더 이상 쓰지 않기로 했으므로 loading이 아니다.
     setStatus('idle')
   }, [])
+
+  /**
+   * 언마운트: 진행 중 요청의 **결과 권한만** 버린다.
+   *
+   * `invalidate()`와 달리 `setStatus`를 부르지 않는다. 화면이 이미 사라지는 중이라
+   * 보여 줄 스피너도 없고, 사라진 트리에 상태를 쓰는 일도 하지 않는다. 브라우저 요청
+   * 자체는 그대로 둔다(끊을 방법이 없다) — 곧 도착할 콜백이 세대가 어긋나 조용히 끝난다.
+   */
+  useEffect(
+    () => () => {
+      generation.current += 1
+      inFlight.current = false
+    },
+    [],
+  )
 
   const request = useCallback(() => {
     if (!supported || inFlight.current) return

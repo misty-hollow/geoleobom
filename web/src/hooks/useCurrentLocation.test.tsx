@@ -10,13 +10,14 @@
  *   3. 상태 6종의 화면(24절 표) 그대로
  */
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 import { ko } from '../copy/ko'
 import { METHOD_NOTICE } from '../format'
 import { resetAnalysisCacheForTests } from './useAnalysis'
+import { useCurrentLocation } from './useCurrentLocation'
 import { resetKakaoSdkForTests } from '../kakao/useKakaoMap'
 import { STORAGE_KEY } from '../storage'
 import { installFakeKakao, uninstallFakeKakao, type FakeKakao } from '../test/fakeKakao'
@@ -459,6 +460,76 @@ describe('현위치 (DESIGN.md 24절)', () => {
       resolveWith(geo, 3500)
       await screen.findByText(ko.locate.inaccurate('3.5km'))
       expect(screen.getByRole('button', { name: ko.pending.analyze })).toBeTruthy()
+    })
+  })
+
+  // --- 언마운트 -------------------------------------------------------------
+  //
+  // 화면이 사라진 뒤 도착한 콜백은 **아무것도 하지 못해야 한다.** 사라진 트리에 상태를
+  // 쓰거나, 다른 화면에서 다시 navigate하거나, 토스트를 띄우면 안 된다.
+
+  describe('언마운트 뒤 늦게 온 응답', () => {
+    /** 훅만 띄운다 — 화면 배선과 무관하게 콜백 자체가 불리지 않는 것을 본다. */
+    function mountHook() {
+      const calls = { success: vi.fn(), denied: vi.fn(), unavailable: vi.fn() }
+      const view = renderHook(() =>
+        useCurrentLocation({
+          onSuccess: calls.success,
+          onDenied: calls.denied,
+          onUnavailable: calls.unavailable,
+        }),
+      )
+      act(() => view.result.current.request())
+      expect(geo.getCurrentPosition).toHaveBeenCalled()
+      return { calls, view }
+    }
+
+    it('늦게 온 성공은 `onSuccess`를 부르지 않는다', () => {
+      const { calls, view } = mountHook()
+      view.unmount()
+      resolveWith(geo, 30)
+      expect(calls.success).not.toHaveBeenCalled()
+    })
+
+    it('늦게 온 거부·실패는 handler를 부르지 않는다', () => {
+      const denied = mountHook()
+      denied.view.unmount()
+      rejectWith(geo, 1)
+      expect(denied.calls.denied).not.toHaveBeenCalled()
+
+      const unavailable = mountHook()
+      unavailable.view.unmount()
+      rejectWith(geo, 2)
+      expect(unavailable.calls.unavailable).not.toHaveBeenCalled()
+    })
+
+    it('언마운트하지 않으면 그대로 불린다 (대조군)', () => {
+      const { calls } = mountHook()
+      resolveWith(geo, 30)
+      expect(calls.success).toHaveBeenCalledTimes(1)
+    })
+
+    it('현위치 요청 중 다른 화면으로 떠나면 늦게 온 응답이 그 화면을 바꾸지 않는다', async () => {
+      await ready()
+      fireEvent.click(locateButton())
+      // 지도 화면을 떠난다(비교는 MapPage가 아닌 라우트다). `pushState`만으로는 라우터가
+      // 모르므로 — 그러면 MapPage가 그대로 살아 있어 이 검사가 아무것도 보지 못한다 —
+      // 브라우저가 보내는 `popstate`까지 흘려 실제로 라우트를 바꾼다.
+      act(() => {
+        window.history.pushState(null, '', '/c?p=36.47130,127.14020')
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+      await waitFor(() => expect(screen.queryByRole('application')).toBeNull())
+      expect(window.location.pathname).toBe('/c')
+      const centers = fake.calls.setCenter.length
+
+      resolveWith(geo, 3500)
+
+      expect(window.location.pathname, '늦게 온 현위치가 화면을 옮겼다').toBe('/c')
+      expect(window.location.search).toBe('?p=36.47130,127.14020')
+      expect(fake.calls.setCenter.length).toBe(centers)
+      expect(screen.queryByText(/위치 오차가/)).toBeNull()
+      expect(screen.queryByRole('button', { name: ko.pending.analyze })).toBeNull()
     })
   })
 
