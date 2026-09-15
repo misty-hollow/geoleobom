@@ -33,6 +33,7 @@ import layoutStyles from '../components/Layout.module.css'
 import { MapView } from '../components/MapView'
 import resultStyles from '../components/result/Result.module.css'
 import {
+  AccuracyWarning,
   HintStrip,
   LoadingStrip,
   PendingBar,
@@ -63,6 +64,7 @@ import { CATEGORY_LABEL } from '../format'
 import { toComparePath } from '../geo/compareUrl'
 import { useAnalysis } from '../hooks/useAnalysis'
 import { useCandidates } from '../hooks/useCandidates'
+import { useCurrentLocation } from '../hooks/useCurrentLocation'
 import { useLayoutMode, useMediaQuery, type LayoutMode } from '../hooks/useLayoutMode'
 import { useRoute, type RouteTarget } from '../hooks/useRoute'
 import { useKakaoMap, type MapPin, type RouteFrame } from '../kakao/useKakaoMap'
@@ -115,6 +117,15 @@ export function MapPage() {
   const describe = useDescribePlace()
 
   const [pending, setPending] = useState<Point | null>(null)
+  /**
+   * 지금 pending 핀이 **현위치에서 온 미확정 좌표인가** (DESIGN.md 24절).
+   *
+   * 값이 아니라 표시만 둔다 — 좌표 자체는 `pending` 하나에만 있다. 이 표시가 하는 일은
+   * 두 가지다: 오차 경고 줄(24절 inaccurate)과 **검색 지도 중심 차단**(아래 `searchCenter`).
+   */
+  const [located, setLocated] = useState<{ accuracyM: number } | null>(null)
+  /** 현위치 훅의 지금 값. 핀 처리 콜백이 훅보다 먼저 선언돼 있어 참조로 잇는다. */
+  const locateRef = useRef<{ invalidate: () => void } | null>(null)
   // 첫 렌더부터 목적 스냅으로 둔다. 'peek'에서 시작하면 공유 URL 진입마다 peek→half 애니메이션이 보인다(QA 2026-09-12).
   const [snap, setSnap] = useState<SheetSnap>(() => (fixed === null ? 'peek' : 'half'))
   const [expanded, setExpanded] = useState<NearestCategory | null>(null)
@@ -217,12 +228,30 @@ export function MapPage() {
   }, [route.state, analysisData, announcer])
 
   // --- 지도 -----------------------------------------------------------------
+  /**
+   * 사용자가 **다른 방법으로** 위치를 정했다 (24절 delta).
+   *
+   * 두 가지를 함께 한다. ① 진행 중인 현위치 요청의 결과 권한을 뺏는다 — 몇 초 뒤 도착한
+   * 응답이 방금 고른 지점을 덮어쓰지 않게. ② `located` 표시를 지운다 — 이제 화면의
+   * pending은 **손대지 않은 geolocation fix가 아니다.** 그 표시가 하는 일 두 가지(오차
+   * 경고, 지도 중심 검색 차단)가 모두 "아직 GPS가 준 그대로인가"를 전제하기 때문이다.
+   *
+   * 특히 핀을 직접 옮긴 뒤에는 경고 문구("핀을 옮겨 정확한 곳을 골라 주세요")가 이미 한
+   * 일을 다시 시키는 말이 된다.
+   */
+  const supersedeLocation = useCallback(() => {
+    locateRef.current?.invalidate()
+    setLocated(null)
+  }, [])
+
   const onPinPlace = useCallback(
     (point: Point) => {
       setPending(point)
+      // 사용자가 지도에서 새로 고른 지점이다. 현위치에서 온 좌표가 아니다.
+      supersedeLocation()
       if (fixedRef.current !== null) navigate('/')
     },
-    [navigate],
+    [navigate, supersedeLocation],
   )
   const onPinDragStart = useCallback(() => {
     const current = fixedRef.current
@@ -232,7 +261,14 @@ export function MapPage() {
       navigate('/')
     }
   }, [navigate])
-  const onPinDragEnd = useCallback((point: Point) => setPending(point), [])
+  const onPinDragEnd = useCallback(
+    (point: Point) => {
+      setPending(point)
+      // 핀을 직접 옮겼다 — 좌표는 이제 사용자가 고른 것이고 GPS 오차 경고도 끝났다.
+      supersedeLocation()
+    },
+    [supersedeLocation],
+  )
 
   const { status: mapStatus, map } = useKakaoMap({
     initialCenter: fixed ?? DEFAULT_CENTER,
@@ -420,18 +456,23 @@ export function MapPage() {
       // 명칭은 **메모리에만** 넣는다(23절). 라우터 state로 넘기면 history.state에 남는다.
       places.remember(point, { name: result.name, source: 'search' })
       if (result.address !== '') rememberAddress(addressesRef.current, pointKey(point), result.address)
+      // 검색 결과를 골랐다. 진행 중인 현위치 요청과 GPS 표시는 여기서 끝난다.
+      supersedeLocation()
       navigate(toPlacePath(point), { replace: isSearch })
     },
-    [navigate, isSearch, places],
+    [navigate, isSearch, places, supersedeLocation],
   )
 
   const analyzePending = useCallback(() => {
     if (pending === null) return
-    // 지도 탭·드래그로 고른 지점(23절 `pin`). 현위치(24절)도 확정되면 같은 의미다.
+    // 지도 탭·드래그로 고른 지점(23절 `pin`). **현위치도 확정되면 같은 의미다** —
+    // `current-location`·`gps` 같은 출처를 새로 만들지 않는다(24절 마지막 줄).
     places.remember(pending, { source: 'pin' })
+    // 확정도 "사용자가 정했다"이다. 늦게 온 현위치가 확정 뒤에 pending을 되살리지 않는다.
+    supersedeLocation()
     navigate(toPlacePath(pending))
     setPending(null)
-  }, [pending, navigate, places])
+  }, [pending, navigate, places, supersedeLocation])
 
   /** × ·같은 행 재탭으로 경로를 닫는다. 지도는 그대로 두고 `userMoved`만 끈다(DESIGN.md 7-2). */
   const closeRoute = useCallback(() => {
@@ -439,6 +480,52 @@ export function MapPage() {
     setExpanded(null)
     map.resetUserMoved()
   }, [route, map])
+
+  /**
+   * 현위치 (DESIGN.md 24절, v2.5 3절).
+   *
+   * 얻은 좌표는 **기존 pending 핀 흐름에 그대로 합류한다.** 분석하지도, `/p`로 옮기지도
+   * 않는다 — 사용자가 보고 필요하면 핀을 옮긴 뒤 `여기 분석`을 눌러야 확정이다.
+   * 지도는 7절 규칙(시트 위 가시영역 세로 중앙)으로 그 핀에 맞춘다. 프로그램 이동이므로
+   * 경로 UX의 `userMoved`를 켜지 않는다(`centerOn`이 그 구분을 이미 한다).
+   */
+  const locate = useCurrentLocation({
+    onSuccess: useCallback(
+      (fix) => {
+        // **여기가 입력 경계다.** 5자리 정규화는 다른 핀 입력과 같은 한 곳에서 한다.
+        const point = normalize(fix.lon, fix.lat)
+        if (point === null) {
+          announcer.toast(ko.locate.unavailable)
+          return
+        }
+        setPending(point)
+        setLocated({ accuracyM: fix.accuracyM })
+        if (fixedRef.current !== null) navigate('/')
+        map.centerOn(point, insetRef.current)
+      },
+      [announcer, map, navigate],
+    ),
+    onDenied: useCallback(() => announcer.toast(ko.locate.denied), [announcer]),
+    onUnavailable: useCallback(() => announcer.toast(ko.locate.unavailable), [announcer]),
+  })
+
+  // `supersedeLocation`은 위(핀 처리)에서 선언돼 이 훅보다 먼저 만들어진다. 그쪽이
+  // 훅의 `invalidate`를 부를 수 있도록 참조만 여기에 담는다.
+  locateRef.current = locate
+
+  /**
+   * 검색이 카카오에 줄 지도 중심 (v2.5 4-4) — **미확정 현위치는 내보내지 않는다.**
+   *
+   * 24절은 "획득 좌표는 확정 전까지 서버·localStorage·sessionStorage·URL에 두지 않는다"고
+   * 정했다. 그런데 현위치 성공 뒤 지도는 그 좌표로 옮겨 가 있으므로, 사용자가 아직
+   * `여기 분석`을 누르지 않은 채 검색하면 **지도 중심이라는 이름으로 그 좌표가
+   * `/api/search`에 실린다.** 그 한 경로만 막는다.
+   *
+   * 평소의 지도 중심 검색(Search B)은 그대로다 — 막는 것은 "현위치에서 온 미확정
+   * pending이 떠 있는 동안"뿐이고, 확정하거나 지도를 탭해 다른 지점을 고르면 곧바로
+   * 돌아온다. 그동안의 검색은 v2.4와 같은 bias 없는 검색이다(계약은 lon·lat 선택이다).
+   */
+  const searchCenter = useCallback(() => (located !== null ? null : map.center()), [located, map])
 
   const toggleRow = useCallback(
     (category: NearestCategory) => {
@@ -570,7 +657,7 @@ export function MapPage() {
     if (invalidCoords) return invalidCard()
     if (fixed === null) {
       return pending !== null ? (
-        <PendingBar point={pending} onAnalyze={analyzePending} />
+        <PendingBar point={pending} onAnalyze={analyzePending} accuracyM={located?.accuracyM ?? null} />
       ) : (
         <HintStrip text={ko.hint.empty} />
       )
@@ -599,6 +686,7 @@ export function MapPage() {
     if (fixed === null) {
       return pending !== null ? (
         <div className={layoutStyles.panelPending}>
+          <AccuracyWarning accuracyM={located?.accuracyM ?? null} />
           <p className={layoutStyles.panelPendingCoord}>
             {ko.pending.label} · {formatPoint(pending)}
           </p>
@@ -642,7 +730,7 @@ export function MapPage() {
       <div className={layoutStyles.desktop}>
         <aside className={layoutStyles.panel} aria-label={ko.sheet.resultLabel}>
           <div className={layoutStyles.panelSearch}>
-            <SearchBox variant="inline" onSelect={goToSearchResult} mapCenter={map.center} />
+            <SearchBox variant="inline" onSelect={goToSearchResult} mapCenter={searchCenter} />
           </div>
           <div className={layoutStyles.panelBody}>{panelBody()}</div>
           <div className={layoutStyles.panelBar}>
@@ -665,6 +753,7 @@ export function MapPage() {
             showZoom
             showRecenter={outOfRegion}
             onRecenter={() => onErrorAction('recenter')}
+            locate={locate.supported ? { status: locate.status, onLocate: locate.request } : null}
           />
         </main>
         {dialogs}
@@ -682,6 +771,7 @@ export function MapPage() {
           showZoom={showZoom}
           showRecenter={outOfRegion}
           onRecenter={() => onErrorAction('recenter')}
+          locate={locate.supported ? { status: locate.status, onLocate: locate.request } : null}
         />
       </main>
       <TopBar onOpenSearch={openSearch} candidateCount={candidates.items.length} onOpenCandidates={() => setCandidatesOpen(true)} />
@@ -689,7 +779,7 @@ export function MapPage() {
         {sheetContent()}
       </Sheet>
       {isSearch && (
-        <SearchOverlay onSelect={goToSearchResult} onBack={() => navigate(-1)} mapCenter={map.center} />
+        <SearchOverlay onSelect={goToSearchResult} onBack={() => navigate(-1)} mapCenter={searchCenter} />
       )}
       {dialogs}
     </div>

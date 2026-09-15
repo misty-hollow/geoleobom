@@ -181,6 +181,16 @@ export const ko = {
     zoomOut: '축소',
   },
 
+  /** 현위치 (DESIGN.md 24절). 문구는 표의 것을 글자 그대로 쓴다. */
+  locate: {
+    label: '현위치',
+    loading: '현위치를 찾고 있어요',
+    denied: '위치 권한이 꺼져 있어요. 검색이나 지도로 골라 주세요',
+    unavailable: '현위치를 가져올 수 없어요',
+    /** `{거리}`는 22절 표기다. 여기서 자리만 만든다. */
+    inaccurate: (distance: string) => `위치 오차가 ${distance}예요. 핀을 옮겨 정확한 곳을 골라 주세요`,
+  },
+
   sheet: {
     handle: '시트 크기 조절',
     resultLabel: '분석 결과',
