@@ -23,6 +23,10 @@ def _to_facility(candidate: Candidate, result: TableResult, seconds: float) -> F
         walk_m=walk_m,
         straight_m=straight_m,
         detour_flag=candidate.straight_m * DETOUR_RATIO <= walk_m,
+        # 후보의 원본 POI 좌표를 그대로 옮긴다. `result`(=/table 결과)의 스냅 좌표를
+        # 여기에 넣지 않는다 — 그 둘은 다른 의미다(FacilityResult 주석).
+        lon=candidate.lon,
+        lat=candidate.lat,
     )
 
 

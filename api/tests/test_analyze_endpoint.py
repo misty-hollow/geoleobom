@@ -361,3 +361,151 @@ def test_analyze_is_unavailable_without_data_or_osrm():
         response = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT})
     # 가짜 데이터로 동작시키지 않는다.
     assert response.status_code == 503
+
+
+# --- 시설 POI 좌표 vs 목적지 스냅 (2026-09-15, 목적지 링 의미 정정) ----------------
+
+
+def _snapped_away_handler(offset_m: float = 20.0, duration: float = 360.0):
+    """목적지를 요청 좌표에서 `offset_m`만큼 **옮겨서** 스냅하는 모의 OSRM.
+
+    실제 그래프가 늘 하는 일이다 — 시설은 건물 안에 있고 보행망은 도로 위에 있어
+    `/table`의 `destinations[].location`이 POI에서 10~30m 떨어진 접근점으로 돌아온다.
+    합성 픽스처가 그 상태를 모델링해야 "응답 좌표가 어느 쪽인가"를 검사할 수 있다.
+    """
+    dlat = offset_m / 111_320.0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/nearest"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": "Ok",
+                    "waypoints": [{"location": [CENTER_LON, CENTER_LAT], "distance": 3.0}],
+                },
+            )
+        # `/{table|route}/v1/foot/{lon,lat};{lon,lat};...` — 첫 좌표가 출발지다.
+        raw = request.url.path.rsplit("/", 1)[-1]
+        pairs = [(float(lon), float(lat)) for lon, lat in (p.split(",") for p in raw.split(";"))]
+
+        if request.url.path.startswith("/route"):
+            # `/route`는 이미 스냅된 두 점을 받는다(분석이 고른 지점). 그 두 점을 그대로
+            # waypoint·geometry 끝으로 돌려준다 — 실제 OSRM도 그렇게 답한다.
+            origin, dest = pairs[0], pairs[-1]
+            return httpx.Response(
+                200,
+                json={
+                    "code": "Ok",
+                    "waypoints": [
+                        {"location": [origin[0], origin[1]], "distance": 3.0},
+                        {"location": [dest[0], dest[1]], "distance": 4.0},
+                    ],
+                    "routes": [
+                        {
+                            "duration": duration,
+                            "distance": duration * 1.3,
+                            "geometry": {
+                                "type": "LineString",
+                                "coordinates": [list(origin), list(dest)],
+                            },
+                        }
+                    ],
+                },
+            )
+
+        destinations = [{"location": [lon, lat + dlat], "distance": 4.0} for lon, lat in pairs[1:]]
+        count = len(destinations)
+        return httpx.Response(
+            200,
+            json={
+                "code": "Ok",
+                "durations": [[duration] * count],
+                "distances": [[duration * 1.3] * count],
+                "destinations": destinations,
+                "sources": [{"location": [CENTER_LON, CENTER_LAT], "distance": 3.0}],
+            },
+        )
+
+    return handler
+
+
+def _poi_row(gpkg: Path, fid: int) -> tuple[float, float]:
+    import sqlite3
+
+    with sqlite3.connect(f"file:{gpkg}?mode=ro", uri=True) as conn:
+        row = conn.execute("SELECT lon, lat FROM poi WHERE fid = ?", (fid,)).fetchone()
+    assert row is not None, f"픽스처에 fid={fid}가 없다"
+    return float(row[0]), float(row[1])
+
+
+def test_facility_coordinates_are_the_original_poi_not_the_destination_snap(
+    synthetic_gpkg: Path,
+):
+    """**응답의 `Facility.lon/lat`는 배포본 POI 좌표다.** `/table`이 고른 접근점이 아니다.
+
+    이것이 목적지 링의 의미다(DESIGN.md 7-1). 스냅을 실으면 링이 도로 한복판을 가리킨다 —
+    사용자가 처음 발견한 증상이 그것이었다. 여기서는 스냅을 일부러 20m 옮겨 두 값이
+    **실제로 갈라지는** 상태를 만들고, 응답이 어느 쪽을 실었는지 본다.
+    """
+    with _client(synthetic_gpkg, _snapped_away_handler(offset_m=20.0)) as client:
+        body = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT}).json()
+
+    checked = 0
+    for item in body["nearest"]:
+        for facility in item["top3"]:
+            poi_lon, poi_lat = _poi_row(synthetic_gpkg, facility["fid"])
+            assert facility["lon"] == pytest.approx(poi_lon, abs=1e-9)
+            assert facility["lat"] == pytest.approx(poi_lat, abs=1e-9)
+            # 스냅은 위로 20m 옮겨 뒀다. 응답이 그 값이었다면 위 단언이 깨진다.
+            assert facility["lat"] != pytest.approx(poi_lat + 20.0 / 111_320.0, abs=1e-9)
+            checked += 1
+    assert checked >= 3, "확인한 시설이 너무 적어 증명이 약하다"
+
+
+def test_facility_coordinates_match_when_poi_and_snap_agree(
+    synthetic_gpkg: Path, client: TestClient
+):
+    """스냅이 POI와 같은 자리면 예전과 **시각적으로 동일**하다 (회귀 경계).
+
+    기본 핸들러는 `destinations[].location`을 주지 않아 스냅이 POI에서 움직이지 않는다.
+    그때도 시설 좌표는 POI이며, 링과 경로 끝이 같은 자리에 겹쳐 보인다.
+    """
+    body = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT}).json()
+    checked = 0
+    for item in body["nearest"]:
+        for facility in item["top3"]:
+            poi_lon, poi_lat = _poi_row(synthetic_gpkg, facility["fid"])
+            assert facility["lon"] == pytest.approx(poi_lon, abs=1e-9)
+            assert facility["lat"] == pytest.approx(poi_lat, abs=1e-9)
+            checked += 1
+    assert checked >= 3
+
+
+def test_route_destination_snap_is_unchanged_by_the_facility_coordinate(
+    synthetic_gpkg: Path,
+):
+    """`Facility.lon/lat` 추가가 **경로 계약을 건드리지 않는다**.
+
+    `/api/route`의 `snapped_dest`와 geometry 마지막 점은 여전히 `/table`이 고른 스냅이고,
+    시설 POI가 아니다. 두 의미가 코드에서 갈라져 있음을 응답으로 고정한다.
+    """
+    dlat = 20.0 / 111_320.0
+    with _client(synthetic_gpkg, _snapped_away_handler(offset_m=20.0)) as client:
+        body = client.get("/api/analyze", params={"lon": CENTER_LON, "lat": CENTER_LAT}).json()
+        facility = next(item["best"] for item in body["nearest"] if item["best"] is not None)
+        route = client.get(
+            "/api/route",
+            params={"lon": CENTER_LON, "lat": CENTER_LAT, "fid": facility["fid"]},
+        )
+
+    assert route.status_code == 200, route.text
+    payload = route.json()
+    snapped_dest = payload["snapped_dest"]
+    end = payload["geometry"]["coordinates"][-1]
+
+    # 계약: geometry 마지막 점 == snapped_dest (기존 그대로)
+    assert end[0] == pytest.approx(snapped_dest["lon"], abs=1e-9)
+    assert end[1] == pytest.approx(snapped_dest["lat"], abs=1e-9)
+    # 그리고 그것은 시설 POI가 **아니다** — 20m 떨어져 있다.
+    assert snapped_dest["lat"] == pytest.approx(facility["lat"] + dlat, abs=1e-6)
+    assert snapped_dest["lat"] != pytest.approx(facility["lat"], abs=1e-9)

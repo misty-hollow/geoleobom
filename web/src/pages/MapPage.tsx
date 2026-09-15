@@ -329,16 +329,50 @@ export function MapPage() {
   const drawnLineRef = useRef(drawnLine)
   drawnLineRef.current = drawnLine
 
-  /** 목적지 링의 `title` = `{카테고리} · {시설명}` (DESIGN.md 7-1). */
-  const destinationTitle = useMemo(() => {
+  /**
+   * 지금 **그려져 있는** 경로가 향하는 시설. 목적지 링의 자리와 `title`이 둘 다 여기서 나온다.
+   *
+   * 한 번만 찾는다 — 예전에는 `title`만 찾았고 링 자리는 geometry 마지막 점이었다.
+   * 그래서 RoutePanel은 시설을 말하는데 링은 보행망 접근점(도로 위)을 가리켰다.
+   * 같은 조회에서 둘을 함께 만들면 그 어긋남이 생길 자리가 없다.
+   *
+   * **`route.drawn`과 짝을 맞춘다.** 로딩 중 `drawn`은 화면에 남아 있는 *이전* 경로이므로
+   * 시설도 이전 것이어야 한다. `state.target`을 그대로 쓰면 로딩이 시작되는 순간 링이
+   * 새 시설로 먼저 뛰어 선과 어긋나고, 응답이 오면 또 한 번 다시 그린다.
+   */
+  const shownDestination = useMemo(() => {
     const state = route.state
     if (state.kind !== 'shown' || analysisData === null) return null
-    const item = analysisData.nearest.find((entry) => entry.category === state.target.category)
-    const facility = item?.top3.find((entry) => entry.fid === state.target.fid) ?? item?.best ?? null
-    return facility === null ? null : `${CATEGORY_LABEL[state.target.category]} · ${facility.name}`
+    const { category, fid } = state.target
+    const item = analysisData.nearest.find((entry) => entry.category === category)
+    const facility = item?.top3.find((entry) => entry.fid === fid) ?? item?.best ?? null
+    return facility === null
+      ? null
+      : { category, name: facility.name, lon: facility.lon, lat: facility.lat }
   }, [route.state, analysisData])
-  const destinationTitleRef = useRef(destinationTitle)
-  destinationTitleRef.current = destinationTitle
+
+  /** 마지막으로 **그린** 시설. `drawn`이 사라질 때만 비운다(로딩 중에는 유지). */
+  const drawnDestinationRef = useRef<typeof shownDestination>(null)
+  if (shownDestination !== null) drawnDestinationRef.current = shownDestination
+  else if (route.drawn === null) drawnDestinationRef.current = null
+  const drawnFacility = drawnDestinationRef.current
+
+  /** 목적지 링의 `title` = `{카테고리} · {시설명}` (DESIGN.md 7-1). */
+  const destinationTitleRef = useRef<string | null>(null)
+  destinationTitleRef.current =
+    drawnFacility === null
+      ? null
+      : `${CATEGORY_LABEL[drawnFacility.category]} · ${drawnFacility.name}`
+
+  /**
+   * 링을 놓을 자리 = **시설의 실제 POI 좌표**(`Facility.lon`/`lat`, v2.5 4-4).
+   *
+   * `/api/route`의 `snapped_dest`나 geometry 마지막 점이 아니다. 그 둘은 보행망
+   * 접근점이며 시설에서 10~30m 떨어져 있을 수 있다(DESIGN.md 7-1).
+   */
+  const destinationPointRef = useRef<LonLatPair | null>(null)
+  destinationPointRef.current =
+    drawnFacility === null ? null : [drawnFacility.lon, drawnFacility.lat]
 
   const drawRoute = useCallback(
     (inset: number, frame: RouteFrame) => {
@@ -350,7 +384,12 @@ export function MapPage() {
       }
       // 모바일은 플로팅 상단바가 지도 위 0~72px을 가린다. 데스크톱 패널 배치에는 상단바가 없다.
       map.setRoute(
-        { line, origin: fixedRef.current ?? undefined, destinationTitle: destinationTitleRef.current ?? undefined },
+        {
+          line,
+          origin: fixedRef.current ?? undefined,
+          destination: destinationPointRef.current ?? undefined,
+          destinationTitle: destinationTitleRef.current ?? undefined,
+        },
         {
           bottomInset: inset,
           topInset: layoutRef.current === 'sheet' ? TOPBAR_H : 0,
@@ -422,6 +461,9 @@ export function MapPage() {
     }
     routeFramePending.current = null
     drawRoute(insetRef.current, frame)
+    // 목적지 시설은 의존성에 **없다.** `drawnFacilityRef`가 `drawn`과 짝을 맞춰 움직이므로
+    // 시설이 바뀌는 순간은 곧 `drawnLine`이 바뀌는 순간이다. 따로 넣으면 로딩 전환마다
+    // 같은 선을 다시 그리게 된다(폴리라인 생성 수가 6 → 10이 된다).
   }, [mapStatus, drawnLine, layout, drawRoute])
 
   const onSheetHeight = useCallback(

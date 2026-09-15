@@ -16,7 +16,15 @@ CATEGORY = "convenience"
 
 
 def _candidate(fid: int, straight_m: float) -> Candidate:
-    return Candidate(fid=fid, name=f"POI {fid}", category=CATEGORY, straight_m=straight_m)
+    # 원본 POI 좌표. fid마다 다른 자리를 줘서 "후보 좌표가 그대로 흘러간다"를 볼 수 있게 한다.
+    return Candidate(
+        fid=fid,
+        name=f"POI {fid}",
+        category=CATEGORY,
+        straight_m=straight_m,
+        lon=127.14020 + fid * 0.0001,
+        lat=36.47130 + fid * 0.0001,
+    )
 
 
 def _result(duration: float | None, distance: float | None, snap: float = 5.0) -> TableResult:

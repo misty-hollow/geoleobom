@@ -39,7 +39,14 @@ def _nearest(count_per_category: int = 2) -> dict[str, list[Candidate]]:
         items = []
         for _ in range(count_per_category):
             items.append(
-                Candidate(fid=fid, name=f"POI {fid}", category=category, straight_m=100.0 + fid)
+                Candidate(
+                    fid=fid,
+                    name=f"POI {fid}",
+                    category=category,
+                    straight_m=100.0 + fid,
+                    lon=127.14020 + fid * 0.0001,
+                    lat=36.47130 + fid * 0.0001,
+                )
             )
             fid += 1
         out[category] = items
@@ -48,7 +55,14 @@ def _nearest(count_per_category: int = 2) -> dict[str, list[Candidate]]:
 
 def _density(count: int, start: int = 500) -> list[Candidate]:
     return [
-        Candidate(fid=start + i, name=f"cafe {i}", category="food_cafe", straight_m=float(i))
+        Candidate(
+            fid=start + i,
+            name=f"cafe {i}",
+            category="food_cafe",
+            straight_m=float(i),
+            lon=127.14020 + i * 0.0001,
+            lat=36.47130 + i * 0.0001,
+        )
         for i in range(count)
     ]
 

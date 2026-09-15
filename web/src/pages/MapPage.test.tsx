@@ -19,6 +19,7 @@ import {
   densityComplete,
   densityIncomplete,
   emptyItem,
+  facilityPoi,
   jsonResponse,
   OTHER_VERSIONS,
   routeFor,
@@ -522,5 +523,94 @@ describe('MapPage', () => {
     const center = fake.calls.setCenter[fake.calls.setCenter.length - 1]
     const insetPx = Math.round((36.4641 - center.getLat()) * 2e5)
     expect(insetPx).toBe(385)
+  })
+  /**
+   * 목적지 링의 의미 — **선택한 실제 시설**이다 (DESIGN.md 7-1, 2026-09-15 확정).
+   *
+   * 링을 경로 geometry의 마지막 점에 놓으면 보행망 접근점(도로 위)을 가리킨다. 충청권
+   * OSM에 보도 geometry가 적어 foot 경로가 도로 중심선에 붙는 것이 원인이고, OSRM
+   * profile이나 geometry는 이번에 바꾸지 않는다 — **링만** 시설 POI로 옮긴다.
+   */
+  describe('목적지 링 = 시설 POI (DESIGN.md 7-1)', () => {
+    /** 링 마커. 출발 핀과 구분하려고 `title`이 있는 것을 고른다(7-1: 링에만 title). */
+    function ringMarker() {
+      return fake.markers.filter((m) => m.title !== null && m.title !== undefined).at(-1) ?? null
+    }
+
+    it('링은 시설 POI에 놓이고, 경로선 끝(접근점)과 떨어져 있다', async () => {
+      renderAt('/p/36.47130,127.14020')
+      await screen.findByText(METHOD_NOTICE)
+      await waitFor(() => expect(fake.lastMap).not.toBeNull())
+      fireEvent.click(screen.getByRole('button', { name: /편의점/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(2))
+
+      const ring = ringMarker()
+      expect(ring, '목적지 링이 없다').not.toBeNull()
+      // 픽스처의 시설 POI: 경로 끝에서 북쪽으로 약 20m (test/fixtures.ts `facilityPoi`).
+      const poi = facilityPoi(101)
+      expect(ring!.position.getLng()).toBeCloseTo(poi.lon, 6)
+      expect(ring!.position.getLat()).toBeCloseTo(poi.lat, 6)
+
+      // 경로 geometry의 마지막 점(= 접근점)과 **다르다**. 예전 구현은 이 값이었다.
+      const end = routeFor(101).geometry.coordinates.at(-1)!
+      expect(ring!.position.getLat()).not.toBeCloseTo(end[1], 6)
+    })
+
+    it('링 title은 RoutePanel이 말하는 시설과 같은 시설을 가리킨다', async () => {
+      renderAt('/p/36.47130,127.14020')
+      await screen.findByText(METHOD_NOTICE)
+      await waitFor(() => expect(fake.lastMap).not.toBeNull())
+      fireEvent.click(screen.getByRole('button', { name: /편의점/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(2))
+      expect(ringMarker()!.title).toBe('편의점 · CU 공주신관점')
+
+      // 다른 시설로 바꾸면 링의 자리와 title이 **함께** 따라간다.
+      fireEvent.click(screen.getByRole('button', { name: /GS25 신관중앙점/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(4))
+      const ring = ringMarker()!
+      expect(ring.title).toBe('편의점 · GS25 신관중앙점')
+      expect(ring.position.getLng()).toBeCloseTo(facilityPoi(102).lon, 6)
+      expect(ring.position.getLat()).toBeCloseTo(facilityPoi(102).lat, 6)
+    })
+
+    it('fit bbox가 시설 POI까지 포함한다 (DESIGN.md 7-2)', async () => {
+      renderAt('/p/36.47130,127.14020')
+      await screen.findByText(METHOD_NOTICE)
+      await waitFor(() => expect(fake.lastMap).not.toBeNull())
+      fireEvent.click(screen.getByRole('button', { name: /편의점/ }))
+      await waitFor(() => expect(fake.calls.setBounds.length).toBeGreaterThan(0))
+
+      const [bounds] = fake.calls.setBounds.at(-1) as [{ points: { getLat(): number; getLng(): number }[] }]
+      const lats = bounds.points.map((p) => p.getLat())
+      const poiLat = facilityPoi(101).lat
+      // 접근점만 넣으면 최대 위도가 경로 끝(36.4713)이 되고 POI는 bbox 밖이 된다.
+      expect(Math.max(...lats)).toBeGreaterThanOrEqual(poiLat)
+      expect(lats.some((lat) => Math.abs(lat - poiLat) < 1e-9), 'bbox에 시설 POI가 없다').toBe(true)
+    })
+
+    it('POI와 접근점이 같은 자리면 예전과 같은 곳에 그린다 (회귀 경계)', async () => {
+      // 시설 좌표를 경로 끝과 같게 둔 분석. 링과 선 끝이 겹쳐 보여야 한다.
+      const end = routeFor(101).geometry.coordinates.at(-1)!
+      handler = (url) => {
+        if (url.pathname === '/api/analyze') {
+          const body = typicalAnalysis()
+          const item = body.nearest[0]
+          item.best = { ...item.best!, lon: end[0], lat: end[1] }
+          item.top3 = [item.best, ...item.top3.slice(1)]
+          return jsonResponse(body)
+        }
+        if (url.pathname === '/api/route') return jsonResponse(routeFor(Number(url.searchParams.get('fid'))))
+        return jsonResponse([])
+      }
+      renderAt('/p/36.47130,127.14020')
+      await screen.findByText(METHOD_NOTICE)
+      await waitFor(() => expect(fake.lastMap).not.toBeNull())
+      fireEvent.click(screen.getByRole('button', { name: /편의점/ }))
+      await waitFor(() => expect(fake.calls.polylineCreated).toBe(2))
+
+      const ring = ringMarker()!
+      expect(ring.position.getLng()).toBeCloseTo(end[0], 6)
+      expect(ring.position.getLat()).toBeCloseTo(end[1], 6)
+    })
   })
 })
