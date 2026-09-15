@@ -24,6 +24,14 @@
  *
  * 뷰포트 크기는 `fake.setViewport(width, height)`로 정한다(jsdom은 레이아웃을 하지 않아
  * 요소 크기가 0이다). 기본값은 390×844다.
+ *
+ * ## 배율이 바뀌면 `zoom_changed`를 **동기로** 흘린다
+ *
+ * 실제 SDK가 그렇게 한다 — `setBounds` 안에서, 우리가 부른 함수가 아직 돌아오기 전에
+ * 이벤트가 온다(2026-09-15 실 SDK 재현). 가짜가 이벤트를 아예 흘리지 않던 동안에는
+ * "프로그램 이동이 `userMoved`를 켜지 않는다"를 검사가 **볼 수 없었고**, 첫 fit 한 번에
+ * `userMoved`가 켜지는 결함이 단위 검사를 모두 통과했다. 그래서 여기서도 같은 순간에
+ * 흘린다.
  */
 
 export interface FakeLatLng {
@@ -61,6 +69,8 @@ export interface FakeMap extends FakeTarget {
   setCenter: (latlng: FakeLatLng) => void
   /** 사용자가 배율을 바꾼 상태를 만든다(DESIGN.md 7-2의 "사용자가 잡아둔 배율"). */
   setLevel: (level: number) => void
+  /** 실제 SDK처럼 이벤트를 흘린다. 배율이 바뀌면 `setBounds`·`setLevel`이 스스로 부른다. */
+  fire: (type: string) => void
   getCenter: () => FakeLatLng
   getLevel: () => number
   /** 중심·배율·뷰포트에서 나오는 투영. 검사가 "화면 어디에 있나"를 직접 잰다. */
@@ -330,8 +340,11 @@ export function createFakeKakao(): FakeKakao {
       // 필요한 축척 이상이 되는 **가장 확대된** 배율. 카카오도 들어가는 선에서 가장 크게 본다.
       const level =
         needed <= 0 ? this.level : Math.max(1, Math.ceil(Math.log2(needed / 1e-5) + 4 - 1e-9))
+      const changed = this.level !== level
       this.level = level
       calls.setLevel.push(level)
+      // 실제 SDK처럼 **이 함수가 돌아오기 전에** 흘린다.
+      if (changed) this.fire('zoom_changed')
       const degPerPx = fakeDegPerPixel(level)
       // 패딩을 뺀 영역의 중앙이 bbox 중앙이 되도록 지도 중심을 민다.
       const offsetX = viewport.width / 2 - (left + availableW / 2)
@@ -352,8 +365,10 @@ export function createFakeKakao(): FakeKakao {
       return this.level
     }
     setLevel(level: number) {
+      const changed = this.level !== level
       this.level = level
       calls.setLevel.push(level)
+      if (changed) this.fire('zoom_changed')
     }
     /** 중심·배율·뷰포트에서 나오는 투영. y는 화면처럼 아래로 커진다. */
     getProjection() {
@@ -374,6 +389,10 @@ export function createFakeKakao(): FakeKakao {
     }
     relayout() {
       this.relayoutCount += 1
+    }
+    /** 등록된 리스너를 그 자리에서 부른다(실제 SDK의 동기 발화). */
+    fire(type: string) {
+      for (const fn of this.listeners[type] ?? []) fn(undefined)
     }
   }
 
