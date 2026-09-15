@@ -88,12 +88,19 @@
   --dur-save: 150ms;
   --dur-toast: 160ms;
 
-  /* 비교표 (DESIGN.md 14절). 후보 열 기준 76, 허용 최소 72 — 표 최소 폭 = 첫 열 + 열 수 × 최소. */
+  /*
+   * 비교표 (DESIGN.md 14절, Week 4). 후보 열 최소 72 — 표 최소 폭 = 첫 열 + 열 수 × 최소.
+   * 뷰포트가 그보다 넓으면 후보 열이 남은 폭을 균등하게 나눈다(390: 75.5, 430: 85.5).
+   * 첫 열 88, ≤359에서는 84(`--compare-first-col-compact`; 320 = 84 + 3×72 + 20 보임).
+   * 후보 헤더 높이: ≤767 100(이름 2줄) / ≥768 80(이름 1줄).
+   */
   --compare-first-col: 88px;
-  --compare-col: 76px;
+  --compare-first-col-compact: 84px;
   --compare-col-min: 72px;
   --compare-first-col-wide: 120px;
   --compare-col-wide: 160px;
+  --compare-head-h: 100px;
+  --compare-head-h-wide: 80px;
 }
 
 /* 20. 반응형 토큰 재정의는 여기에서만 */
@@ -102,6 +109,7 @@
     --pad-x: var(--s-3);
     --t-num-l: 24px;
     --lh-num-l: 28px;
+    --compare-first-col: var(--compare-first-col-compact);
   }
 }
 
