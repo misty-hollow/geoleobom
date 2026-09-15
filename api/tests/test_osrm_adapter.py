@@ -18,7 +18,14 @@ ORIGIN = Snap(lon=127.14020, lat=36.47130, snap_distance_m=3.0)
 
 def _candidates(count: int) -> list[Candidate]:
     return [
-        Candidate(fid=i, name=f"POI {i}", category="convenience", straight_m=100.0 + i)
+        Candidate(
+            fid=i,
+            name=f"POI {i}",
+            category="convenience",
+            straight_m=100.0 + i,
+            lon=127.14020 + i * 0.0001,
+            lat=36.47130 + i * 0.0001,
+        )
         for i in range(1, count + 1)
     ]
 

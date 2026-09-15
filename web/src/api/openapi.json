@@ -114,6 +114,16 @@
             "title": "Fid",
             "type": "integer"
           },
+          "lat": {
+            "description": "시설 자체의 좌표. `lon` 설명과 같다",
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "description": "시설 자체의 좌표(GeoPackage 배포본 원본). 보행망 스냅 지점이 아니다 — `/api/route`의 `snapped_dest`·geometry 마지막 점과 다를 수 있다",
+            "title": "Lon",
+            "type": "number"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -137,7 +147,9 @@
           "walk_seconds",
           "walk_m",
           "straight_m",
-          "detour_flag"
+          "detour_flag",
+          "lon",
+          "lat"
         ],
         "title": "Facility",
         "type": "object"

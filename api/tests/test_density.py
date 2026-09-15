@@ -34,7 +34,14 @@ def _response(results: dict[int, TableResult], source: Snap | None = CANONICAL) 
 
 def _candidates(count: int) -> list[Candidate]:
     return [
-        Candidate(fid=i, name=f"cafe {i}", category="food_cafe", straight_m=float(i))
+        Candidate(
+            fid=i,
+            name=f"cafe {i}",
+            category="food_cafe",
+            straight_m=float(i),
+            lon=127.14020 + i * 0.0001,
+            lat=36.47130 + i * 0.0001,
+        )
         for i in range(count)
     ]
 

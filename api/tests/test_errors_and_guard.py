@@ -17,7 +17,14 @@ from app.schemas import ErrorResponse
 
 def _candidates(start: int, count: int, category: str = "convenience") -> list[Candidate]:
     return [
-        Candidate(fid=i, name=f"POI {i}", category=category, straight_m=float(i))
+        Candidate(
+            fid=i,
+            name=f"POI {i}",
+            category=category,
+            straight_m=float(i),
+            lon=127.14020 + i * 0.0001,
+            lat=36.47130 + i * 0.0001,
+        )
         for i in range(start, start + count)
     ]
 

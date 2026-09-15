@@ -39,6 +39,28 @@ def osrm() -> OsrmClient:
     return OsrmClient(OSRM_URL, timeout_s=30.0)
 
 
+def _candidates(
+    coordinates: list[tuple[float, float]], category: str, start: int = 1
+) -> list[Candidate]:
+    """`coordinates`와 **같은 좌표**를 들고 있는 후보들.
+
+    실제 시스템에서 `Candidate.lon/lat`와 `/table`에 보내는 좌표는 같은 POI 행에서 온다
+    (`PoiRepository.find_candidates`·`coordinates_for`). 픽스처도 그 관계를 지킨다 —
+    둘을 따로 지어내면 "후보 좌표가 응답까지 그대로 간다"를 검사할 수 없다.
+    """
+    return [
+        Candidate(
+            fid=start + i,
+            name=f"p{i}",
+            category=category,
+            straight_m=100.0,
+            lon=lon,
+            lat=lat,
+        )
+        for i, (lon, lat) in enumerate(coordinates)
+    ]
+
+
 def _ring(count: int, radius_m: float = 900.0) -> list[tuple[float, float]]:
     import math
 
@@ -61,10 +83,7 @@ def test_real_nearest_snaps_the_origin(osrm: OsrmClient):
 def test_real_table_1x160(osrm: OsrmClient):
     """게이트 2: 161좌표로 1×160 응답을 실제로 받는다."""
     coordinates = _ring(MAX_TABLE_DESTINATIONS)
-    candidates = [
-        Candidate(fid=i + 1, name=f"p{i}", category="food_cafe", straight_m=100.0)
-        for i in range(MAX_TABLE_DESTINATIONS)
-    ]
+    candidates = _candidates(coordinates, "food_cafe")
     origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert origin is not None
 
@@ -80,9 +99,7 @@ def test_real_table_1x160(osrm: OsrmClient):
 def test_real_snap_suspects_are_visible(osrm: OsrmClient):
     """목적지 스냅 거리가 실제로 돌아오는지 본다(v2.3 4-3 6단계의 입력)."""
     coordinates = _ring(40)
-    candidates = [
-        Candidate(fid=i + 1, name=f"p{i}", category="park", straight_m=100.0) for i in range(40)
-    ]
+    candidates = _candidates(coordinates, "park")
     origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert origin is not None
 
@@ -105,10 +122,7 @@ def test_real_table_returns_destination_snap_points(osrm: OsrmClient):
     그것은 v2.4가 금지한 "재스냅의 결정성으로 대체하기"다.
     """
     coordinates = _ring(8)
-    candidates = [
-        Candidate(fid=i + 1, name=f"p{i}", category="convenience", straight_m=100.0)
-        for i in range(8)
-    ]
+    candidates = _candidates(coordinates, "convenience")
     origin = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert origin is not None
 
@@ -145,10 +159,7 @@ def test_real_nearest_and_table_can_disagree_on_the_origin(osrm: OsrmClient):
     검사는 skip되지만, 살아 있는 동안은 `/table` 쪽을 권위로 삼아야 하는 근거다.
     """
     coordinates = _ring(4)
-    candidates = [
-        Candidate(fid=i + 1, name=f"p{i}", category="convenience", straight_m=100.0)
-        for i in range(4)
-    ]
+    candidates = _candidates(coordinates, "convenience")
     nearest_snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert nearest_snap is not None
 
@@ -174,10 +185,7 @@ def test_real_route_uses_exactly_the_snap_points_table_chose(osrm: OsrmClient):
     (AGENTS.md 4절).
     """
     coordinates = _ring(6)
-    candidates = [
-        Candidate(fid=i + 1, name=f"p{i}", category="convenience", straight_m=100.0)
-        for i in range(6)
-    ]
+    candidates = _candidates(coordinates, "convenience")
     nearest_snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert nearest_snap is not None
 
@@ -208,8 +216,8 @@ def test_real_route_without_hints_lands_on_the_same_point(osrm: OsrmClient):
     """
     nearest_snap = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert nearest_snap is not None
-    candidates = [Candidate(fid=1, name="p", category="convenience", straight_m=100.0)]
     coordinates = _ring(1)
+    candidates = _candidates(coordinates, "convenience")
     response = osrm.table(nearest_snap, candidates, coordinates)
     origin = response.source or nearest_snap
     dest = response.results[1].destination_snap()
@@ -248,13 +256,6 @@ def test_real_snap_distance_recomputation_matches_osrm_closely(osrm: OsrmClient)
 # --- 추가 밀도 배치의 출발지 (2026-09-13, Astra finding 5-B) --------------------
 
 
-def _candidates(count: int, start: int = 1) -> list[Candidate]:
-    return [
-        Candidate(fid=start + i, name=f"p{start + i}", category="food_cafe", straight_m=100.0)
-        for i in range(count)
-    ]
-
-
 def test_real_table_source_can_depend_on_the_destination_set(osrm: OsrmClient):
     """**같은 출발 좌표라도 목적지 집합이 다르면 `/table`이 다른 지점에서 출발할 수 있다.**
 
@@ -276,8 +277,8 @@ def test_real_table_source_can_depend_on_the_destination_set(osrm: OsrmClient):
 
     near = _ring(6, radius_m=300.0)
     far = _ring(6, radius_m=2500.0)
-    first = osrm.table(origin, _candidates(6), near)
-    second = osrm.table(origin, _candidates(6, start=100), far)
+    first = osrm.table(origin, _candidates(near, "food_cafe"), near)
+    second = osrm.table(origin, _candidates(far, "food_cafe", start=100), far)
     assert first.source is not None and second.source is not None
 
     if same_snap_point(first.source, second.source):
@@ -299,13 +300,17 @@ def test_real_second_batch_from_the_canonical_source_lands_on_the_same_point(
     preliminary = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert preliminary is not None
 
-    first = osrm.table(preliminary, _candidates(8), _ring(8, radius_m=400.0))
+    first_coords = _ring(8, radius_m=400.0)
+    first = osrm.table(preliminary, _candidates(first_coords, "food_cafe"), first_coords)
     canonical = first.source
     assert canonical is not None, "/table 응답에 sources[0]이 있어야 한다"
 
     # 추가 배치들: 목적지 집합을 매번 다르게 둔다.
     for index, radius in enumerate((900.0, 1800.0, 2600.0), start=1):
-        batch = osrm.table(canonical, _candidates(8, start=200 * index), _ring(8, radius_m=radius))
+        batch_coords = _ring(8, radius_m=radius)
+        batch = osrm.table(
+            canonical, _candidates(batch_coords, "food_cafe", start=200 * index), batch_coords
+        )
         assert batch.source is not None, f"추가 배치 {index} 응답에 sources[0]이 없다"
         assert same_snap_point(batch.source, canonical), (
             f"추가 배치 {index}(반경 {radius}m)가 다른 지점에서 출발했다: "
@@ -322,7 +327,8 @@ def test_real_analysis_snap_distance_is_measured_from_the_input(osrm: OsrmClient
     """
     preliminary = osrm.nearest(ORIGIN_LON, ORIGIN_LAT)
     assert preliminary is not None
-    response = osrm.table(preliminary, _candidates(8), _ring(8, radius_m=600.0))
+    coords = _ring(8, radius_m=600.0)
+    response = osrm.table(preliminary, _candidates(coords, "food_cafe"), coords)
     assert response.source is not None
 
     measured = haversine_m(ORIGIN_LON, ORIGIN_LAT, response.source.lon, response.source.lat)

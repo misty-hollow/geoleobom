@@ -7,12 +7,18 @@ from datetime import datetime
 
 @dataclass(frozen=True)
 class Candidate:
-    """R*Tree 조회·반경 필터·거리순 정렬을 마친 POI 후보 (v2.4 4-3 4단계)."""
+    """R*Tree 조회·반경 필터·거리순 정렬을 마친 POI 후보 (v2.4 4-3 4단계).
+
+    `lon`·`lat`는 **GeoPackage 배포본의 원본 POI 좌표**다. 보행망 스냅 지점이 아니다 —
+    이 값이 흘러 내려가 응답 `Facility.lon`·`lat`가 되고, 화면의 목적지 링이 여기 놓인다.
+    """
 
     fid: int
     name: str
     category: str
     straight_m: float
+    lon: float
+    lat: float
 
 
 @dataclass(frozen=True)
@@ -108,12 +114,23 @@ class RegionInfo:
 
 @dataclass(frozen=True)
 class FacilityResult:
+    """응답에 실리는 최근접 시설 하나.
+
+    `lon`·`lat`는 **시설 자체의 원본 POI 좌표**이며 `Candidate`에서 그대로 온다.
+    `/table`·`/route`가 돌려준 목적지 스냅(`RouteContext.destinations`,
+    `RouteResult.snapped_dest`)과는 **다른 값이고 다른 의미**다 — 스냅은 보행망 위의
+    접근점이고 이 값은 건물·시설이 실제로 있는 자리다. 둘을 섞으면 지도의 목적지 링이
+    도로 한복판을 가리킨다(이번 변경의 출발점).
+    """
+
     fid: int
     name: str
     walk_seconds: int
     walk_m: int
     straight_m: int
     detour_flag: bool
+    lon: float
+    lat: float
 
 
 @dataclass(frozen=True)

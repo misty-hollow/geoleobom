@@ -72,6 +72,9 @@ def test_openapi_has_the_contract_fields():
         "walk_m",
         "straight_m",
         "detour_flag",
+        # 시설 자체의 원본 POI 좌표(additive). 목적지 스냅과 다른 의미다.
+        "lon",
+        "lat",
     }
     assert set(schema["Density"]["properties"]) == {
         "category",

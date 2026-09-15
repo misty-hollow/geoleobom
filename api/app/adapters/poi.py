@@ -116,6 +116,10 @@ class PoiRepository:
                     name=row["name"],
                     category=row["category"],
                     straight_m=straight_m,
+                    # 배포본의 원본 POI 좌표. `coordinates_for`가 `/table`에 보내는 값과
+                    # 같은 출처이며, OSRM이 돌려주는 스냅 좌표와는 다르다.
+                    lon=row["lon"],
+                    lat=row["lat"],
                 )
             )
         candidates.sort(key=lambda c: (c.straight_m, c.fid))
